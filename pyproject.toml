@@ -1,0 +1,27 @@
+[project]
+name = "bright"
+version = "1.0.4"
+description = "Simple script that controls software and hardware monitor brightness"
+
+requires-python = ">=3.9"
+
+authors = [
+  {name = "Adam Ryczkowski", email = "adam@statystyka.net" }
+]
+
+dependencies = [
+  "numpy",
+  "click"
+]
+
+
+## The following would provide a command line executable called `sample`
+## which executes the function `main` from this package when invoked.
+[project.scripts]  # Optional
+bright = "Brightness.cli:main"
+
+#[tool.setuptools]
+### If there are data files included in your packages that need to be
+### installed, specify them here.
+##package-data = {"sample" = ["*.dat"]}
+#py-modules = ["multiplex_calculator"]
