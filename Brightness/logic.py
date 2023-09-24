@@ -142,14 +142,17 @@ def set_gamma_correction(decimal_level: int, dark_gamma: bool):
         gamma_range = linear_range(1.0, 2.0, LEVEL_SIZES[2])[decimal_level]
         brightness = 1
 
-    os.system(f"xrandr --output eDP --gamma {gamma_range} --brightness {brightness}")
+    primary_monitor = get_primary_monitor_cached()
+
+    os.system(f"xrandr --output {primary_monitor} --gamma {gamma_range} --brightness {brightness}")
 
 
 def remove_gamma_correction():
     """
     Removes the gamma correction using external xrandr program.
     """
-    os.system(f"xrandr --output eDP --gamma 1.0")
+    primary_monitor = get_primary_monitor_cached()
+    os.system(f"xrandr --output {primary_monitor} --gamma 1.0")
 
 
 def set_brightness_high_level(new_level: int):
@@ -184,6 +187,40 @@ def set_max_brightness():
     """
     set_brightness_high_level(LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1)
 
+def get_primary_monitor()->str:
+    # Runs `xrandr | grep primary` that produces an example output of
+    # "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm"
+    # and returns the name "eDP-1"
+    import subprocess
+    output = subprocess.check_output(["xrandr"]).decode("utf-8")
+    for line in output.split("\n"):
+        if "primary" in line:
+            return line.split()[0]
+    return ""
+
+def get_primary_monitor_cached()->str:
+    """
+    Checks /tmp/primary_monitor file and returns the name of the primary monitor.
+    If the file is older than 1 day or absent, it calls get_primary_monitor() and saves the result to the file.
+    :return: name of the primary monitor
+    """
+    import os
+    import time
+    import datetime
+    import subprocess
+    import tempfile
+
+    file_name = "/tmp/primary_monitor"
+    if os.path.exists(file_name):
+        file_time = os.path.getmtime(file_name)
+        if time.time() - file_time < 24 * 3600:
+            with open(file_name, "r") as f:
+                return f.read().strip()
+
+    primary_monitor = get_primary_monitor()
+    with open(file_name, "w") as f:
+        f.write(primary_monitor)
+    return primary_monitor
 
 def set_min_brightness():
     """
