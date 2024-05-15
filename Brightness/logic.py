@@ -90,7 +90,8 @@ def get_brightness_paths() -> Iterator[Path]:
     """
     paths = [Path(p) for p in ["/sys/class/backlight/amdgpu_bl1", "/sys/class/backlight/amdgpu_bl0",
                                "/sys/class/backlight/nvidia_wmi_ec_backlight",
-                               "/sys/class/backlight/intel_backlight"]]
+                               "/sys/class/backlight/intel_backlight",
+                               "/sys/class/backlight/acpi_video0", "/sys/class/backlight/acpi_video1"]]
     flag_returned = False
     for path in paths:
         if os.path.exists(path / "brightness") and os.path.exists(path / "max_brightness"):
