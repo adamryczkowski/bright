@@ -167,8 +167,15 @@ def set_hardware_brightness(decimal_level: int):
     for path in get_brightness_paths():
         max_brightness = get_max_hardware_brightness(path)
         new_brightness = int(exp_range(0, max_brightness, LEVEL_SIZES[1] - 1, HARDWARE_BRIGHTNESS_ALPHA)[decimal_level])
-        with open(str(path / "brightness"), "w") as f:
-            f.write(str(new_brightness))
+        try:
+            with open(str(path / "brightness"), "w") as f:
+                f.write(str(new_brightness))
+        except PermissionError as e:
+            raise PermissionError(
+                f"Cannot write to {path}/brightness. "
+                "Try adding user to 'video' group or using udev rules. "
+                "See README.md for details."
+            ) from e
 
 
 def set_gamma_correction_wayland(decimal_level: int, dark_gamma: bool):
@@ -239,7 +246,10 @@ def set_gamma_correction_x11(decimal_level: int, dark_gamma: bool):
         brightness = 1
 
     primary_monitor = get_primary_monitor_cached()
-    os.system(f"xrandr --output {primary_monitor} --gamma {gamma_range} --brightness {brightness}")
+    subprocess.run(
+        ["xrandr", "--output", primary_monitor, "--gamma", str(gamma_range), "--brightness", str(brightness)],
+        capture_output=True,
+    )
 
 
 def set_gamma_correction(decimal_level: int, dark_gamma: bool):
@@ -279,7 +289,10 @@ def remove_gamma_correction_x11():
     Removes the gamma correction on X11 using xrandr.
     """
     primary_monitor = get_primary_monitor_cached()
-    os.system(f"xrandr --output {primary_monitor} --gamma 1.0 --brightness 1.0")
+    subprocess.run(
+        ["xrandr", "--output", primary_monitor, "--gamma", "1.0", "--brightness", "1.0"],
+        capture_output=True,
+    )
 
 
 def remove_gamma_correction():
@@ -328,6 +341,9 @@ def get_primary_monitor() -> str:
     Gets the primary monitor name.
     On X11: Uses xrandr to find the primary monitor.
     On Wayland: Returns a placeholder since wl-gammarelay-rs applies to all outputs.
+
+    Raises:
+        RuntimeError: If no primary monitor is found on X11.
     """
     if is_wayland():
         # wl-gammarelay-rs applies gamma/brightness to all outputs
@@ -340,7 +356,7 @@ def get_primary_monitor() -> str:
     for line in output.split("\n"):
         if "primary" in line:
             return line.split()[0]
-    return ""
+    raise RuntimeError("No primary monitor found. Check xrandr output.")
 
 
 def get_primary_monitor_cached() -> str:

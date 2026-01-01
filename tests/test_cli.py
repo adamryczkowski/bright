@@ -56,14 +56,14 @@ def test_cli_decrease_operation(runner):
 
 
 def test_cli_invalid_operation(runner):
-    """CLI with invalid operation should print error message."""
+    """CLI with invalid operation should return non-zero exit code and show error."""
     with (
         patch("Brightness.cli.set_max_brightness") as mock_max,
         patch("Brightness.cli.set_min_brightness") as mock_min,
         patch("Brightness.cli.change_brightness") as mock_change,
     ):
         result = runner.invoke(main, ["invalid"])
-        assert result.exit_code == 0
+        assert result.exit_code != 0  # Should fail with non-zero exit code
         assert "Invalid operation" in result.output
         mock_max.assert_not_called()
         mock_min.assert_not_called()

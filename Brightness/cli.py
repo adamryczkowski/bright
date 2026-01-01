@@ -19,4 +19,7 @@ def main(operation: str):
     elif operation == "-":
         change_brightness(False)
     else:
-        print("Invalid operation")
+        raise click.BadParameter(
+            f"Invalid operation: '{operation}'. Valid operations are: +, -, max, min",
+            param_hint="'OPERATION'",
+        )
