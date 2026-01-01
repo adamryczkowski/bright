@@ -1,0 +1,73 @@
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-toml
+      - id: check-yaml
+      - id: mixed-line-ending
+      - id: debug-statements
+  - repo: https://github.com/sirwart/ripsecrets
+    rev: v0.1.11
+    hooks:
+      - id: ripsecrets
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.11
+    hooks:
+      - id: ruff
+        name: ruff lint
+        args: [--fix]
+      - id: ruff-format
+        name: ruff-format
+  - repo: https://github.com/python-poetry/poetry
+    rev: 2.1.3
+    hooks:
+      - id: poetry-check
+        name: poetry check
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.405
+    hooks:
+      - id: pyright
+        name: pyright
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        files: \.(md|rst|adoc|txt)$
+        args: [-L, thirdparty]
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest with coverage
+        entry: bash -c 'poetry run coverage run --source Brightness -m pytest -W error::RuntimeWarning
+          && poetry run coverage report -m'
+        language: system
+        pass_filenames: false
+        always_run: true
+  - repo: https://github.com/lyz-code/yamlfix
+    rev: 1.17.0
+    hooks:
+      - id: yamlfix
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args:
+          - -d
+          - '{extends: default, rules: {line-length: {max: 120}, truthy: disable}}'
+  - repo: https://github.com/adamryczkowski/beautysh
+    rev: v6.2.3
+    hooks:
+      - id: beautysh
+        args: [--indent-size=4, --tab, --force-function-style=fnpar]
+  - repo: https://github.com/detailyang/pre-commit-shell
+    rev: 1.0.5
+    hooks:
+      - id: shell-lint
+        stages: [manual]

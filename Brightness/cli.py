@@ -1,6 +1,6 @@
-from .logic import set_max_brightness, set_min_brightness, change_brightness
 import click
 
+from .logic import change_brightness, set_max_brightness, set_min_brightness
 
 # Convert to click:
 # def main():

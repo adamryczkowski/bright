@@ -1,9 +1,9 @@
 import os
 import subprocess
-import numpy as np
-from typing import Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
+import numpy as np
 
 LEVEL_SIZES = [10, 10, 10]
 
@@ -25,11 +25,7 @@ def is_wl_gammarelay_running() -> bool:
     Checks if wl-gammarelay-rs D-Bus service is available.
     """
     try:
-        result = subprocess.run(
-            ["busctl", "--user", "status", "rs.wl-gammarelay"],
-            capture_output=True,
-            timeout=2
-        )
+        result = subprocess.run(["busctl", "--user", "status", "rs.wl-gammarelay"], capture_output=True, timeout=2)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
@@ -40,17 +36,14 @@ def start_wl_gammarelay():
     Starts wl-gammarelay-rs service in background if not already running.
     """
     if not is_wl_gammarelay_running():
-        subprocess.Popen(
-            ["wl-gammarelay-rs", "run"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        subprocess.Popen(["wl-gammarelay-rs", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Wait a bit for the service to start
         import time
+
         time.sleep(0.5)
 
 
-def exp_range(xmin, xmax, n, alpha=1.):
+def exp_range(xmin, xmax, n, alpha=1.0):
     """
     Returns a list of n values that divide the range (xmin, xmax) in exponentially-increasing range within xmin..xmax.
     """
@@ -99,7 +92,7 @@ def read_brightness_level() -> int:
     """
     brightness_file = os.path.expanduser("~/.local/share/brightness_level")
     if os.path.exists(brightness_file):
-        with open(brightness_file, "r") as f:
+        with open(brightness_file) as f:
             level = int(f.read().strip())
     else:
         level = LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1  # i.e. maximum brightness_file level without gamma correction
@@ -126,10 +119,17 @@ def get_brightness_paths() -> Iterator[Path]:
     """
     Gets the path to the brightness file.
     """
-    paths = [Path(p) for p in ["/sys/class/backlight/amdgpu_bl1", "/sys/class/backlight/amdgpu_bl0",
-                               "/sys/class/backlight/nvidia_wmi_ec_backlight",
-                               "/sys/class/backlight/intel_backlight",
-                               "/sys/class/backlight/acpi_video0", "/sys/class/backlight/acpi_video1"]]
+    paths = [
+        Path(p)
+        for p in [
+            "/sys/class/backlight/amdgpu_bl1",
+            "/sys/class/backlight/amdgpu_bl0",
+            "/sys/class/backlight/nvidia_wmi_ec_backlight",
+            "/sys/class/backlight/intel_backlight",
+            "/sys/class/backlight/acpi_video0",
+            "/sys/class/backlight/acpi_video1",
+        ]
+    ]
     flag_returned = False
     for path in paths:
         if os.path.exists(path / "brightness") and os.path.exists(path / "max_brightness"):
@@ -143,7 +143,7 @@ def get_max_hardware_brightness(path: Path) -> int:
     """
     Reads the maximum hardware brightness from the file specified in the path returned by get_brightness_path().
     """
-    with open(path / "max_brightness", "r") as f:
+    with open(path / "max_brightness") as f:
         max_brightness = int(f.read().strip())
     return max_brightness
 
@@ -152,7 +152,7 @@ def get_current_hardware_brightness(path: Path) -> int:
     """
     Reads the current hardware brightness from the file specified in the path returned by get_brightness_path().
     """
-    with open(path / "brightness", "r") as f:
+    with open(path / "brightness") as f:
         current_brightness = int(f.read().strip())
     return current_brightness
 
@@ -173,13 +173,13 @@ def set_gamma_correction_wayland(decimal_level: int, dark_gamma: bool):
     Sets gamma correction on Wayland using wl-gammarelay-rs D-Bus interface.
     For dark gamma the brightness range is 0.1 ... 1.0 .
     For bright gamma the gamma range is 1.0 ... 0.5 (inverted from xrandr).
-    
+
     Note: wl-gammarelay-rs gamma works inversely to xrandr:
     - xrandr: gamma > 1.0 = brighter midtones
     - wl-gammarelay-rs: gamma < 1.0 = brighter image
     """
     start_wl_gammarelay()
-    
+
     if dark_gamma:
         gamma_value = 1.0
         brightness_value = float(linear_range(0.1, 1.0, LEVEL_SIZES[0])[decimal_level])
@@ -190,18 +190,36 @@ def set_gamma_correction_wayland(decimal_level: int, dark_gamma: bool):
         brightness_value = 1.0
 
     # Set brightness via D-Bus
-    subprocess.run([
-        "busctl", "--user", "set-property",
-        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
-        "Brightness", "d", str(brightness_value)
-    ], capture_output=True)
-    
+    subprocess.run(
+        [
+            "busctl",
+            "--user",
+            "set-property",
+            "rs.wl-gammarelay",
+            "/",
+            "rs.wl.gammarelay",
+            "Brightness",
+            "d",
+            str(brightness_value),
+        ],
+        capture_output=True,
+    )
+
     # Set gamma via D-Bus
-    subprocess.run([
-        "busctl", "--user", "set-property",
-        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
-        "Gamma", "d", str(gamma_value)
-    ], capture_output=True)
+    subprocess.run(
+        [
+            "busctl",
+            "--user",
+            "set-property",
+            "rs.wl-gammarelay",
+            "/",
+            "rs.wl.gammarelay",
+            "Gamma",
+            "d",
+            str(gamma_value),
+        ],
+        capture_output=True,
+    )
 
 
 def set_gamma_correction_x11(decimal_level: int, dark_gamma: bool):
@@ -239,20 +257,18 @@ def remove_gamma_correction_wayland():
     Removes the gamma correction on Wayland using wl-gammarelay-rs D-Bus interface.
     """
     start_wl_gammarelay()
-    
+
     # Reset brightness to 1.0
-    subprocess.run([
-        "busctl", "--user", "set-property",
-        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
-        "Brightness", "d", "1.0"
-    ], capture_output=True)
-    
+    subprocess.run(
+        ["busctl", "--user", "set-property", "rs.wl-gammarelay", "/", "rs.wl.gammarelay", "Brightness", "d", "1.0"],
+        capture_output=True,
+    )
+
     # Reset gamma to 1.0
-    subprocess.run([
-        "busctl", "--user", "set-property",
-        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
-        "Gamma", "d", "1.0"
-    ], capture_output=True)
+    subprocess.run(
+        ["busctl", "--user", "set-property", "rs.wl-gammarelay", "/", "rs.wl.gammarelay", "Gamma", "d", "1.0"],
+        capture_output=True,
+    )
 
 
 def remove_gamma_correction_x11():
@@ -293,10 +309,7 @@ def change_brightness(flag_increase: bool):
     Increases the brightness by STEP_SIZE and returns the new brightness level.
     """
     level = read_brightness_level()
-    if flag_increase:
-        new_level = min(level + STEP_SIZE, sum(LEVEL_SIZES) - 1)
-    else:
-        new_level = max(level - STEP_SIZE, 0)
+    new_level = min(level + STEP_SIZE, sum(LEVEL_SIZES) - 1) if flag_increase else max(level - STEP_SIZE, 0)
     set_brightness_high_level(new_level)
 
 
@@ -316,7 +329,7 @@ def get_primary_monitor() -> str:
     if is_wayland():
         # wl-gammarelay-rs applies gamma/brightness to all outputs
         return "wayland-all"
-    
+
     # X11: Runs `xrandr | grep primary` that produces an example output of
     # "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm"
     # and returns the name "eDP-1"
@@ -338,31 +351,30 @@ def get_primary_monitor_cached() -> str:
 
     file_name = "/tmp/primary_monitor"
     wayland_marker = "/tmp/primary_monitor_wayland"
-    
+
     current_is_wayland = is_wayland()
     cached_is_wayland = os.path.exists(wayland_marker)
-    
+
     # Invalidate cache if display server type changed
-    if current_is_wayland != cached_is_wayland:
-        if os.path.exists(file_name):
-            os.remove(file_name)
-    
+    if current_is_wayland != cached_is_wayland and os.path.exists(file_name):
+        os.remove(file_name)
+
     if os.path.exists(file_name):
         file_time = os.path.getmtime(file_name)
         if time.time() - file_time < 24 * 3600:
-            with open(file_name, "r") as f:
+            with open(file_name) as f:
                 return f.read().strip()
 
     primary_monitor = get_primary_monitor()
     with open(file_name, "w") as f:
         f.write(primary_monitor)
-    
+
     # Update wayland marker
     if current_is_wayland:
         Path(wayland_marker).touch()
     elif os.path.exists(wayland_marker):
         os.remove(wayland_marker)
-    
+
     return primary_monitor
 
 

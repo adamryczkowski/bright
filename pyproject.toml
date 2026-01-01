@@ -1,27 +1,61 @@
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
 [project]
 name = "bright"
 version = "1.0.4"
 description = "Simple script that controls software and hardware monitor brightness"
-
-requires-python = ">=3.9"
-
-authors = [
-  {name = "Adam Ryczkowski", email = "adam@statystyka.net" }
-]
+readme = "README.md"
+requires-python = ">= 3.9"
+authors = [{ name = "Adam Ryczkowski", email = "adam@statystyka.net" }]
+keywords = ["brightness", "monitor", "gamma", "backlight", "wayland", "x11"]
 
 dependencies = [
-  "numpy",
-  "click"
+    "numpy",
+    "click",
 ]
 
-
-## The following would provide a command line executable called `sample`
-## which executes the function `main` from this package when invoked.
-[project.scripts]  # Optional
+[project.scripts]
 bright = "Brightness.cli:main"
 
-#[tool.setuptools]
-### If there are data files included in your packages that need to be
-### installed, specify them here.
-##package-data = {"sample" = ["*.dat"]}
-#py-modules = ["multiplex_calculator"]
+[project.urls]
+Homepage = "https://github.com/adamryczkowski/bright"
+
+[tool.poetry]
+packages = [{ include = "Brightness" }]
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.0.1"
+pyright = "^1.1.405"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.0"
+coverage = "^7.6.0"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+# Configure pytest discovery so test-*.py (hyphen) is collected.
+# Keep tests/pytest.ini file empty per requirements; configuration lives here.
+[tool.pytest.ini_options]
+python_files = ["test-*.py", "test_*.py", "*_test.py"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["Brightness"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 0
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
