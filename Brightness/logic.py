@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -11,6 +12,10 @@ STEP_SIZE = 1
 DARK_GAMMA_RANGE = 0
 HARDWARE_RANGE = 1
 BRIGHT_GAMMA_RANGE = 2
+
+# Alpha value for exponential brightness scaling in hardware range
+# Higher values create more perceptually uniform brightness steps
+HARDWARE_BRIGHTNESS_ALPHA = 1.4
 
 
 def is_wayland() -> bool:
@@ -38,8 +43,6 @@ def start_wl_gammarelay():
     if not is_wl_gammarelay_running():
         subprocess.Popen(["wl-gammarelay-rs", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Wait a bit for the service to start
-        import time
-
         time.sleep(0.5)
 
 
@@ -101,15 +104,15 @@ def read_brightness_level() -> int:
     return level
 
 
-def get_brightness_range(brighness_level: int) -> int:
+def get_brightness_range(brightness_level: int) -> int:
     """
     Returns the range of brightness levels, one of 0, 1 and 2, corresponding to
     DARK_GAMMA_RANGE, HARDWARE_RANGE and BRIGHT_GAMMA_RANGE respectively.
     Each range consists of 10 levels.
     """
-    if brighness_level < LEVEL_SIZES[0]:
+    if brightness_level < LEVEL_SIZES[0]:
         return DARK_GAMMA_RANGE
-    elif brighness_level < LEVEL_SIZES[0] + LEVEL_SIZES[1]:
+    elif brightness_level < LEVEL_SIZES[0] + LEVEL_SIZES[1]:
         return HARDWARE_RANGE
     else:
         return BRIGHT_GAMMA_RANGE
@@ -163,7 +166,7 @@ def set_hardware_brightness(decimal_level: int):
     """
     for path in get_brightness_paths():
         max_brightness = get_max_hardware_brightness(path)
-        new_brightness = int(exp_range(0, max_brightness, LEVEL_SIZES[1] - 1, 1.4)[decimal_level])
+        new_brightness = int(exp_range(0, max_brightness, LEVEL_SIZES[1] - 1, HARDWARE_BRIGHTNESS_ALPHA)[decimal_level])
         with open(str(path / "brightness"), "w") as f:
             f.write(str(new_brightness))
 
@@ -347,8 +350,6 @@ def get_primary_monitor_cached() -> str:
     Also invalidates cache if display server type changed (X11 <-> Wayland).
     :return: name of the primary monitor
     """
-    import time
-
     file_name = "/tmp/primary_monitor"
     wayland_marker = "/tmp/primary_monitor_wayland"
 
