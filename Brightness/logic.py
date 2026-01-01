@@ -1,4 +1,5 @@
 import os
+import subprocess
 import numpy as np
 from typing import Iterator
 from pathlib import Path
@@ -10,6 +11,43 @@ STEP_SIZE = 1
 DARK_GAMMA_RANGE = 0
 HARDWARE_RANGE = 1
 BRIGHT_GAMMA_RANGE = 2
+
+
+def is_wayland() -> bool:
+    """
+    Detects if running under Wayland by checking WAYLAND_DISPLAY environment variable.
+    """
+    return os.environ.get("WAYLAND_DISPLAY") is not None
+
+
+def is_wl_gammarelay_running() -> bool:
+    """
+    Checks if wl-gammarelay-rs D-Bus service is available.
+    """
+    try:
+        result = subprocess.run(
+            ["busctl", "--user", "status", "rs.wl-gammarelay"],
+            capture_output=True,
+            timeout=2
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def start_wl_gammarelay():
+    """
+    Starts wl-gammarelay-rs service in background if not already running.
+    """
+    if not is_wl_gammarelay_running():
+        subprocess.Popen(
+            ["wl-gammarelay-rs", "run"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Wait a bit for the service to start
+        import time
+        time.sleep(0.5)
 
 
 def exp_range(xmin, xmax, n, alpha=1.):
@@ -130,11 +168,47 @@ def set_hardware_brightness(decimal_level: int):
             f.write(str(new_brightness))
 
 
-def set_gamma_correction(decimal_level: int, dark_gamma: bool):
+def set_gamma_correction_wayland(decimal_level: int, dark_gamma: bool):
     """
-    High-level function that sets the gamma correction using external xrandr program.
-    For dark gamma the range is 0.1 ... 1.0 .
-    For bright gamma the range is 1.0 ... 2.0 .
+    Sets gamma correction on Wayland using wl-gammarelay-rs D-Bus interface.
+    For dark gamma the brightness range is 0.1 ... 1.0 .
+    For bright gamma the gamma range is 1.0 ... 0.5 (inverted from xrandr).
+    
+    Note: wl-gammarelay-rs gamma works inversely to xrandr:
+    - xrandr: gamma > 1.0 = brighter midtones
+    - wl-gammarelay-rs: gamma < 1.0 = brighter image
+    """
+    start_wl_gammarelay()
+    
+    if dark_gamma:
+        gamma_value = 1.0
+        brightness_value = float(linear_range(0.1, 1.0, LEVEL_SIZES[0])[decimal_level])
+    else:
+        # For "overbright", use gamma < 1.0 (inverse of xrandr's gamma > 1.0)
+        # xrandr uses 1.0 -> 2.0, we use 1.0 -> 0.5
+        gamma_value = float(linear_range(1.0, 0.5, LEVEL_SIZES[2])[decimal_level])
+        brightness_value = 1.0
+
+    # Set brightness via D-Bus
+    subprocess.run([
+        "busctl", "--user", "set-property",
+        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
+        "Brightness", "d", str(brightness_value)
+    ], capture_output=True)
+    
+    # Set gamma via D-Bus
+    subprocess.run([
+        "busctl", "--user", "set-property",
+        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
+        "Gamma", "d", str(gamma_value)
+    ], capture_output=True)
+
+
+def set_gamma_correction_x11(decimal_level: int, dark_gamma: bool):
+    """
+    Sets gamma correction on X11 using xrandr.
+    For dark gamma the brightness range is 0.1 ... 1.0 .
+    For bright gamma the gamma range is 1.0 ... 2.0 .
     """
     if dark_gamma:
         gamma_range = 1
@@ -144,16 +218,60 @@ def set_gamma_correction(decimal_level: int, dark_gamma: bool):
         brightness = 1
 
     primary_monitor = get_primary_monitor_cached()
-
     os.system(f"xrandr --output {primary_monitor} --gamma {gamma_range} --brightness {brightness}")
+
+
+def set_gamma_correction(decimal_level: int, dark_gamma: bool):
+    """
+    High-level function that sets the gamma correction.
+    Automatically detects X11 or Wayland and uses the appropriate method.
+    For dark gamma the range is 0.1 ... 1.0 .
+    For bright gamma the range is 1.0 ... 2.0 .
+    """
+    if is_wayland():
+        set_gamma_correction_wayland(decimal_level, dark_gamma)
+    else:
+        set_gamma_correction_x11(decimal_level, dark_gamma)
+
+
+def remove_gamma_correction_wayland():
+    """
+    Removes the gamma correction on Wayland using wl-gammarelay-rs D-Bus interface.
+    """
+    start_wl_gammarelay()
+    
+    # Reset brightness to 1.0
+    subprocess.run([
+        "busctl", "--user", "set-property",
+        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
+        "Brightness", "d", "1.0"
+    ], capture_output=True)
+    
+    # Reset gamma to 1.0
+    subprocess.run([
+        "busctl", "--user", "set-property",
+        "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
+        "Gamma", "d", "1.0"
+    ], capture_output=True)
+
+
+def remove_gamma_correction_x11():
+    """
+    Removes the gamma correction on X11 using xrandr.
+    """
+    primary_monitor = get_primary_monitor_cached()
+    os.system(f"xrandr --output {primary_monitor} --gamma 1.0 --brightness 1.0")
 
 
 def remove_gamma_correction():
     """
-    Removes the gamma correction using external xrandr program.
+    Removes the gamma correction.
+    Automatically detects X11 or Wayland and uses the appropriate method.
     """
-    primary_monitor = get_primary_monitor_cached()
-    os.system(f"xrandr --output {primary_monitor} --gamma 1.0")
+    if is_wayland():
+        remove_gamma_correction_wayland()
+    else:
+        remove_gamma_correction_x11()
 
 
 def set_brightness_high_level(new_level: int):
@@ -188,30 +306,47 @@ def set_max_brightness():
     """
     set_brightness_high_level(LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1)
 
-def get_primary_monitor()->str:
-    # Runs `xrandr | grep primary` that produces an example output of
+
+def get_primary_monitor() -> str:
+    """
+    Gets the primary monitor name.
+    On X11: Uses xrandr to find the primary monitor.
+    On Wayland: Returns a placeholder since wl-gammarelay-rs applies to all outputs.
+    """
+    if is_wayland():
+        # wl-gammarelay-rs applies gamma/brightness to all outputs
+        return "wayland-all"
+    
+    # X11: Runs `xrandr | grep primary` that produces an example output of
     # "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm"
     # and returns the name "eDP-1"
-    import subprocess
     output = subprocess.check_output(["xrandr"]).decode("utf-8")
     for line in output.split("\n"):
         if "primary" in line:
             return line.split()[0]
     return ""
 
-def get_primary_monitor_cached()->str:
+
+def get_primary_monitor_cached() -> str:
     """
     Checks /tmp/primary_monitor file and returns the name of the primary monitor.
     If the file is older than 1 day or absent, it calls get_primary_monitor() and saves the result to the file.
+    Also invalidates cache if display server type changed (X11 <-> Wayland).
     :return: name of the primary monitor
     """
-    import os
     import time
-    import datetime
-    import subprocess
-    import tempfile
 
     file_name = "/tmp/primary_monitor"
+    wayland_marker = "/tmp/primary_monitor_wayland"
+    
+    current_is_wayland = is_wayland()
+    cached_is_wayland = os.path.exists(wayland_marker)
+    
+    # Invalidate cache if display server type changed
+    if current_is_wayland != cached_is_wayland:
+        if os.path.exists(file_name):
+            os.remove(file_name)
+    
     if os.path.exists(file_name):
         file_time = os.path.getmtime(file_name)
         if time.time() - file_time < 24 * 3600:
@@ -221,12 +356,18 @@ def get_primary_monitor_cached()->str:
     primary_monitor = get_primary_monitor()
     with open(file_name, "w") as f:
         f.write(primary_monitor)
+    
+    # Update wayland marker
+    if current_is_wayland:
+        Path(wayland_marker).touch()
+    elif os.path.exists(wayland_marker):
+        os.remove(wayland_marker)
+    
     return primary_monitor
+
 
 def set_min_brightness():
     """
     Sets the minimum brightness and gamma 1.0.
     """
     set_brightness_high_level(LEVEL_SIZES[0] - 1)
-
-
