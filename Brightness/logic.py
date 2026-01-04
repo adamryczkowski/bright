@@ -306,7 +306,18 @@ def remove_gamma_correction():
         remove_gamma_correction_x11()
 
 
-def set_brightness_high_level(new_level: int):
+def set_brightness_high_level(new_level: int, no_keyboard: bool = False) -> tuple[int, tuple[int, int, int] | None]:
+    """
+    Sets the brightness to the specified level.
+
+    Args:
+        new_level: The brightness level to set (0-29).
+        no_keyboard: If True, skip keyboard backlight update.
+
+    Returns:
+        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
+        (red, green, blue) values 0-255 or None if keyboard was skipped.
+    """
     level_range = get_brightness_range(new_level)
     if level_range == HARDWARE_RANGE:
         remove_gamma_correction()
@@ -319,21 +330,44 @@ def set_brightness_high_level(new_level: int):
         set_hardware_brightness(LEVEL_SIZES[1] - 1)
     write_brightness_level(new_level)
 
+    # Update keyboard backlight based on screen brightness
+    from .keyboard import update_keyboard_backlight
 
-def change_brightness(flag_increase: bool):
+    keyboard_rgb = update_keyboard_backlight(new_level, no_keyboard=no_keyboard)
+    return (new_level, keyboard_rgb)
+
+
+def change_brightness(flag_increase: bool, no_keyboard: bool = False) -> tuple[int, tuple[int, int, int] | None]:
     """
-    Increases the brightness by STEP_SIZE and returns the new brightness level.
+    Changes the brightness by STEP_SIZE.
+
+    Args:
+        flag_increase: If True, increase brightness; otherwise decrease.
+        no_keyboard: If True, skip keyboard backlight update.
+
+    Returns:
+        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
+        (red, green, blue) values 0-255 or None if keyboard was skipped.
     """
     level = read_brightness_level()
     new_level = min(level + STEP_SIZE, sum(LEVEL_SIZES) - 1) if flag_increase else max(level - STEP_SIZE, 0)
-    set_brightness_high_level(new_level)
+    return set_brightness_high_level(new_level, no_keyboard=no_keyboard)
 
 
-def set_max_brightness():
+def set_max_brightness(
+    no_keyboard: bool = False,
+) -> tuple[int, tuple[int, int, int] | None]:
     """
     Sets the maximum brightness and gamma 1.0.
+
+    Args:
+        no_keyboard: If True, skip keyboard backlight update.
+
+    Returns:
+        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
+        (red, green, blue) values 0-255 or None if keyboard was skipped.
     """
-    set_brightness_high_level(LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1)
+    return set_brightness_high_level(LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1, no_keyboard=no_keyboard)
 
 
 def get_primary_monitor() -> str:
@@ -395,8 +429,17 @@ def get_primary_monitor_cached() -> str:
     return primary_monitor
 
 
-def set_min_brightness():
+def set_min_brightness(
+    no_keyboard: bool = False,
+) -> tuple[int, tuple[int, int, int] | None]:
     """
     Sets the minimum brightness and gamma 1.0.
+
+    Args:
+        no_keyboard: If True, skip keyboard backlight update.
+
+    Returns:
+        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
+        (red, green, blue) values 0-255 or None if keyboard was skipped.
     """
-    set_brightness_high_level(LEVEL_SIZES[0] - 1)
+    return set_brightness_high_level(LEVEL_SIZES[0] - 1, no_keyboard=no_keyboard)

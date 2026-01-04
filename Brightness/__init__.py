@@ -1,3 +1,12 @@
+from .config import (
+    Config as Config,
+)
+from .keyboard import (
+    KeyboardBacklight as KeyboardBacklight,
+)
+from .keyboard import (
+    update_keyboard_backlight as update_keyboard_backlight,
+)
 from .logic import (
     change_brightness as change_brightness,
 )
@@ -16,4 +25,7 @@ __all__ = [
     "set_brightness_high_level",
     "set_max_brightness",
     "set_min_brightness",
+    "Config",
+    "KeyboardBacklight",
+    "update_keyboard_backlight",
 ]

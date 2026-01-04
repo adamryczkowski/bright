@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "bright"
-version = "1.0.4"
+version = "1.1.0"
 description = "Simple script that controls software and hardware monitor brightness"
 readme = "README.md"
 requires-python = ">= 3.9"
@@ -14,6 +14,7 @@ keywords = ["brightness", "monitor", "gamma", "backlight", "wayland", "x11"]
 dependencies = [
     "numpy",
     "click",
+    "tomli; python_version < '3.11'",
 ]
 
 [project.scripts]

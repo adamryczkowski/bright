@@ -1,0 +1,63 @@
+# Bright Configuration File
+# Copy this file to ~/.config/bright/config.toml and customize as needed.
+#
+# All values shown below are the defaults. You only need to include
+# settings you want to change from the defaults.
+
+[brightness]
+# Default brightness level when state file doesn't exist (0-29)
+default_level = 19
+
+# Path to the file that stores the current brightness level
+state_file = "~/.local/share/brightness_level"
+
+[keyboard]
+# Enable/disable keyboard backlight control
+enabled = true
+
+# Backend to use for keyboard control
+# Options: "openrgb-cli" (recommended), "hidapi" (direct HID access)
+backend = "openrgb-cli"
+
+# OpenRGB device index (use `openrgb --list-devices` to find your keyboard)
+device_index = 0
+
+# OpenRGB mode to use (use `openrgb --list-devices` to see available modes)
+# Common modes: "direct", "static", "breathing", "rainbow"
+# Most keyboards support "direct" mode
+mode = "direct"
+
+# HID device identifiers (only used with "hidapi" backend)
+# Use `lsusb` or similar to find your keyboard's vendor/product IDs
+vendor_id = 0x048D
+product_id = 0xC967
+
+# Screen brightness level above which keyboard backlight is disabled
+# When the room is bright enough to need high screen brightness,
+# you probably don't need keyboard backlight
+disable_threshold = 15
+
+# Screen brightness range for keyboard backlight mapping
+# Backlight power is interpolated between max_power and min_power
+# as screen brightness goes from max_backlight_level to min_backlight_level
+max_backlight_level = 14
+min_backlight_level = 0
+
+# Maximum keyboard backlight power (0.0-1.0)
+# Used when screen brightness is at max_backlight_level (twilight)
+max_power = 0.8
+
+# Minimum keyboard backlight power (0.0-1.0)
+# Used when screen brightness is at min_backlight_level (total darkness)
+# Set to 0.0 to turn off keyboard at minimum screen brightness
+min_power = 0.0
+
+# Gamma correction: controls keyboard brightness curve
+# Higher values = gentler changes at low brightness, rapid at high
+# 2.0 is a good default for matching screen brightness perception
+gamma = 2.0
+
+# Base color for keyboard backlight (hex format)
+# The actual brightness is controlled by scaling this color
+# Default is a warm amber color (R=19, G=9, B=0)
+base_color = "#130900"

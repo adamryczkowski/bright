@@ -8,6 +8,8 @@ Simple CLI tool for controlling monitor brightness on Linux with extended range 
 - **Software gamma correction** for extended brightness range beyond hardware limits
 - **Wayland support** via [wl-gammarelay-rs](https://github.com/MaxVerevkin/wl-gammarelay-rs)
 - **X11 support** via xrandr
+- **Keyboard backlight integration** via [OpenRGB](https://openrgb.org/) - automatically adjusts keyboard backlight based on screen brightness
+- **TOML configuration** for persistent settings
 - **30-level brightness scale** with three ranges:
   - Dark gamma range (levels 0-9): Software dimming below hardware minimum
   - Hardware range (levels 10-19): Native backlight control
@@ -51,6 +53,9 @@ bright +
 
 # Decrease brightness by one step
 bright -
+
+# Disable keyboard backlight control for this invocation
+bright --no-keyboard +
 ```
 
 ## System Requirements
@@ -121,6 +126,46 @@ Brightness level is stored in `~/.local/share/brightness_level`.
 
 The default brightness level is 19 (maximum hardware brightness without gamma correction).
 
+### Configuration File
+
+You can customize behavior using a TOML configuration file at `~/.config/bright/config.toml`.
+
+See [`docs/config.toml.example`](docs/config.toml.example) for all available options.
+
+Example configuration:
+
+```toml
+[brightness]
+default_level = 19
+state_file = "~/.local/share/brightness_level"
+
+[keyboard]
+enabled = true
+backend = "openrgb-cli"
+device_index = 0
+disable_threshold = 15
+max_power = 0.8
+min_power = 0.1
+base_color = "#FFFFFF"
+```
+
+### Keyboard Backlight
+
+The keyboard backlight is automatically adjusted based on screen brightness:
+
+- **Above threshold (default: level 15)**: Keyboard backlight is OFF (room is bright enough)
+- **At twilight (levels 10-14)**: Keyboard backlight at maximum power (80% by default)
+- **In darkness (levels 0-9)**: Keyboard backlight dims with screen brightness (down to 10%)
+
+This behavior ensures:
+- In bright rooms, you don't need keyboard illumination
+- At twilight, you get maximum keyboard visibility when you need it most
+- In total darkness, a dim keyboard won't blind you
+
+To disable keyboard control:
+- Permanently: Set `enabled = false` in config file
+- Per-invocation: Use `--no-keyboard` flag
+
 ## How it works
 
 The tool provides a unified 30-level brightness scale:
@@ -131,9 +176,16 @@ The tool provides a unified 30-level brightness scale:
 
 ## Dependencies
 
+### Required
+
 - Python >= 3.9
 - numpy
 - click
+- tomli (for Python < 3.11)
+
+### Optional
+
+- [OpenRGB](https://openrgb.org/) - for keyboard backlight control
 
 ## Development
 
