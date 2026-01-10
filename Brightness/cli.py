@@ -1,7 +1,10 @@
+import sys
+
 import click
 
 from .config import Config
 from .logic import (
+    DisplayNotAvailableError,
     change_brightness,
     set_brightness_high_level,
     set_max_brightness,
@@ -49,30 +52,34 @@ def main(no_keyboard: bool, operation: str):
         config_path = Config.get_user_config_path()
         click.echo(f"Created default configuration: {config_path}", err=True)
 
-    if operation == "max":
-        level, keyboard_rgb = set_max_brightness(no_keyboard=no_keyboard)
-        click.echo(format_output(level, keyboard_rgb))
-    elif operation == "min":
-        level, keyboard_rgb = set_min_brightness(no_keyboard=no_keyboard)
-        click.echo(format_output(level, keyboard_rgb))
-    elif operation == "+":
-        level, keyboard_rgb = change_brightness(True, no_keyboard=no_keyboard)
-        click.echo(format_output(level, keyboard_rgb))
-    elif operation == "-":
-        level, keyboard_rgb = change_brightness(False, no_keyboard=no_keyboard)
-        click.echo(format_output(level, keyboard_rgb))
-    elif operation.isdigit():
-        # Set specific brightness level
-        target_level = int(operation)
-        if target_level < 0 or target_level > 29:
+    try:
+        if operation == "max":
+            level, keyboard_rgb = set_max_brightness(no_keyboard=no_keyboard)
+            click.echo(format_output(level, keyboard_rgb))
+        elif operation == "min":
+            level, keyboard_rgb = set_min_brightness(no_keyboard=no_keyboard)
+            click.echo(format_output(level, keyboard_rgb))
+        elif operation == "+":
+            level, keyboard_rgb = change_brightness(True, no_keyboard=no_keyboard)
+            click.echo(format_output(level, keyboard_rgb))
+        elif operation == "-":
+            level, keyboard_rgb = change_brightness(False, no_keyboard=no_keyboard)
+            click.echo(format_output(level, keyboard_rgb))
+        elif operation.isdigit():
+            # Set specific brightness level
+            target_level = int(operation)
+            if target_level < 0 or target_level > 29:
+                raise click.BadParameter(
+                    f"Brightness level must be between 0 and 29, got {target_level}",
+                    param_hint="'OPERATION'",
+                )
+            level, keyboard_rgb = set_brightness_high_level(target_level, no_keyboard=no_keyboard)
+            click.echo(format_output(level, keyboard_rgb))
+        else:
             raise click.BadParameter(
-                f"Brightness level must be between 0 and 29, got {target_level}",
+                f"Invalid operation: '{operation}'. Valid operations are: +, -, max, min, or 0-29",
                 param_hint="'OPERATION'",
             )
-        level, keyboard_rgb = set_brightness_high_level(target_level, no_keyboard=no_keyboard)
-        click.echo(format_output(level, keyboard_rgb))
-    else:
-        raise click.BadParameter(
-            f"Invalid operation: '{operation}'. Valid operations are: +, -, max, min, or 0-29",
-            param_hint="'OPERATION'",
-        )
+    except DisplayNotAvailableError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)

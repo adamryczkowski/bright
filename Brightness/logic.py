@@ -8,6 +8,17 @@ import numpy as np
 
 LEVEL_SIZES = [10, 10, 10]
 
+
+class DisplayNotAvailableError(Exception):
+    """
+    Raised when no display is available for brightness control.
+    This typically happens when running over SSH without X11 forwarding
+    or without a local display session.
+    """
+
+    pass
+
+
 STEP_SIZE = 1
 DARK_GAMMA_RANGE = 0
 HARDWARE_RANGE = 1
@@ -16,6 +27,64 @@ BRIGHT_GAMMA_RANGE = 2
 # Alpha value for exponential brightness scaling in hardware range
 # Higher values create more perceptually uniform brightness steps
 HARDWARE_BRIGHTNESS_ALPHA = 1.4
+
+
+def get_x11_display() -> str | None:
+    """
+    Gets the X11 display identifier for xrandr commands.
+
+    Returns the DISPLAY environment variable if set, otherwise tries common
+    display identifiers (:0, :0.0) to find a working display.
+
+    Returns:
+        Display identifier string (e.g., ":0") or None if no display is available.
+    """
+    # First check if DISPLAY is already set
+    display = os.environ.get("DISPLAY")
+    if display:
+        return display
+
+    # Try common display identifiers for remote SSH sessions
+    for test_display in [":0", ":0.0", ":1"]:
+        try:
+            env = os.environ.copy()
+            env["DISPLAY"] = test_display
+            result = subprocess.run(
+                ["xrandr", "-display", test_display],
+                capture_output=True,
+                timeout=5,
+                env=env,
+            )
+            if result.returncode == 0:
+                return test_display
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+
+    return None
+
+
+def ensure_dbus_session() -> bool:
+    """
+    Ensures DBUS_SESSION_BUS_ADDRESS is set for the current user.
+
+    For SSH sessions, the D-Bus session bus address may not be set.
+    This function tries to set it to the standard user bus location.
+
+    Returns:
+        True if D-Bus session is available, False otherwise.
+    """
+    if os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        return True
+
+    # Try the standard user bus location
+    uid = os.getuid()
+    user_bus_path = f"/run/user/{uid}/bus"
+
+    if os.path.exists(user_bus_path):
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={user_bus_path}"
+        return True
+
+    return False
 
 
 def is_wayland() -> bool:
@@ -29,6 +98,9 @@ def is_wl_gammarelay_running() -> bool:
     """
     Checks if wl-gammarelay-rs D-Bus service is available.
     """
+    # Ensure D-Bus session is available for remote SSH sessions
+    ensure_dbus_session()
+
     try:
         result = subprocess.run(["busctl", "--user", "status", "rs.wl-gammarelay"], capture_output=True, timeout=2)
         return result.returncode == 0
@@ -39,7 +111,18 @@ def is_wl_gammarelay_running() -> bool:
 def start_wl_gammarelay():
     """
     Starts wl-gammarelay-rs service in background if not already running.
+
+    Raises:
+        DisplayNotAvailableError: If D-Bus session is not available (e.g., SSH without display).
     """
+    # Ensure D-Bus session is available
+    if not ensure_dbus_session():
+        raise DisplayNotAvailableError(
+            "No D-Bus session available. "
+            "This typically happens when running over SSH without a local display session. "
+            "Ensure a graphical session is running on the target machine."
+        )
+
     if not is_wl_gammarelay_running():
         subprocess.Popen(["wl-gammarelay-rs", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Wait a bit for the service to start
@@ -237,6 +320,9 @@ def set_gamma_correction_x11(decimal_level: int, dark_gamma: bool):
     Sets gamma correction on X11 using xrandr.
     For dark gamma the brightness range is 0.1 ... 1.0 .
     For bright gamma the gamma range is 1.0 ... 2.0 .
+
+    Raises:
+        DisplayNotAvailableError: If no X11 display is available.
     """
     if dark_gamma:
         gamma_range = 1
@@ -246,10 +332,23 @@ def set_gamma_correction_x11(decimal_level: int, dark_gamma: bool):
         brightness = 1
 
     primary_monitor = get_primary_monitor_cached()
-    subprocess.run(
-        ["xrandr", "--output", primary_monitor, "--gamma", str(gamma_range), "--brightness", str(brightness)],
-        capture_output=True,
-    )
+    display = get_x11_display()
+
+    cmd = ["xrandr", "--output", primary_monitor, "--gamma", str(gamma_range), "--brightness", str(brightness)]
+    if display:
+        cmd = [
+            "xrandr",
+            "-display",
+            display,
+            "--output",
+            primary_monitor,
+            "--gamma",
+            str(gamma_range),
+            "--brightness",
+            str(brightness),
+        ]
+
+    subprocess.run(cmd, capture_output=True)
 
 
 def set_gamma_correction(decimal_level: int, dark_gamma: bool):
@@ -287,12 +386,18 @@ def remove_gamma_correction_wayland():
 def remove_gamma_correction_x11():
     """
     Removes the gamma correction on X11 using xrandr.
+
+    Raises:
+        DisplayNotAvailableError: If no X11 display is available.
     """
     primary_monitor = get_primary_monitor_cached()
-    subprocess.run(
-        ["xrandr", "--output", primary_monitor, "--gamma", "1.0", "--brightness", "1.0"],
-        capture_output=True,
-    )
+    display = get_x11_display()
+
+    cmd = ["xrandr", "--output", primary_monitor, "--gamma", "1.0", "--brightness", "1.0"]
+    if display:
+        cmd = ["xrandr", "-display", display, "--output", primary_monitor, "--gamma", "1.0", "--brightness", "1.0"]
+
+    subprocess.run(cmd, capture_output=True)
 
 
 def remove_gamma_correction():
@@ -377,16 +482,43 @@ def get_primary_monitor() -> str:
     On Wayland: Returns a placeholder since wl-gammarelay-rs applies to all outputs.
 
     Raises:
+        DisplayNotAvailableError: If no display is available (e.g., SSH without X11 forwarding).
         RuntimeError: If no primary monitor is found on X11.
     """
     if is_wayland():
         # wl-gammarelay-rs applies gamma/brightness to all outputs
         return "wayland-all"
 
-    # X11: Runs `xrandr | grep primary` that produces an example output of
+    # Try to get a working display for X11
+    display = get_x11_display()
+    if display is None:
+        raise DisplayNotAvailableError(
+            "No X11 display available. "
+            "This typically happens when running over SSH without X11 forwarding. "
+            "To control brightness remotely, ensure:\n"
+            "  - A graphical session is running on the target machine, or\n"
+            "  - Use SSH with X11 forwarding (ssh -X), or\n"
+            "  - Set DISPLAY environment variable (e.g., DISPLAY=:0)"
+        )
+
+    # X11: Runs `xrandr -display <display>` that produces an example output of
     # "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm"
     # and returns the name "eDP-1"
-    output = subprocess.check_output(["xrandr"]).decode("utf-8")
+    try:
+        result = subprocess.run(
+            ["xrandr", "-display", display],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            raise DisplayNotAvailableError(f"Cannot connect to X11 display '{display}': {stderr.strip()}")
+        output = result.stdout.decode("utf-8")
+    except subprocess.CalledProcessError as e:
+        raise DisplayNotAvailableError(f"Failed to run xrandr: {e}") from e
+    except FileNotFoundError:
+        raise DisplayNotAvailableError("xrandr command not found. Please install xrandr.") from None
+
     for line in output.split("\n"):
         if "primary" in line:
             return line.split()[0]
