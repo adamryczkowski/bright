@@ -8,7 +8,10 @@ Simple CLI tool for controlling monitor brightness on Linux with extended range 
 - **Software gamma correction** for extended brightness range beyond hardware limits
 - **Wayland support** via [wl-gammarelay-rs](https://github.com/MaxVerevkin/wl-gammarelay-rs)
 - **X11 support** via xrandr
-- **Keyboard backlight integration** via [OpenRGB](https://openrgb.org/) - automatically adjusts keyboard backlight based on screen brightness
+- **Keyboard backlight integration** - automatically adjusts keyboard backlight based on screen brightness
+  - **brightnessctl** for system keyboard backlights (ThinkPad, etc.)
+  - **OpenRGB** for RGB keyboards
+  - **Auto-detection** of available backend
 - **TOML configuration** for persistent settings
 - **30-level brightness scale** with three ranges:
   - Dark gamma range (levels 0-9): Software dimming below hardware minimum
@@ -141,8 +144,7 @@ state_file = "~/.local/share/brightness_level"
 
 [keyboard]
 enabled = true
-backend = "openrgb-cli"
-device_index = 0
+backend = "auto"  # auto-detect: brightnessctl, openrgb-cli, or hidapi
 disable_threshold = 15
 max_power = 0.8
 min_power = 0.1
@@ -151,7 +153,22 @@ base_color = "#FFFFFF"
 
 ### Keyboard Backlight
 
-The keyboard backlight is automatically adjusted based on screen brightness:
+The keyboard backlight is automatically adjusted based on screen brightness.
+
+#### Supported Backends
+
+- **brightnessctl**: For system keyboard backlights (ThinkPad `tpacpi::kbd_backlight`, etc.)
+  - Requires `brightnessctl` to be installed
+  - Supports discrete brightness levels (typically 0, 1, 2)
+- **openrgb-cli**: For RGB keyboards via [OpenRGB](https://openrgb.org/)
+  - Requires `openrgb` to be installed
+  - Supports full RGB color control
+- **hidapi**: Direct HID communication for specific keyboards (Lenovo Legion, etc.)
+  - Requires the `hid` Python package
+
+The default `backend = "auto"` will automatically detect and use the first available backend.
+
+#### Behavior
 
 - **Above threshold (default: level 15)**: Keyboard backlight is OFF (room is bright enough)
 - **At twilight (levels 10-14)**: Keyboard backlight at maximum power (80% by default)
@@ -185,7 +202,8 @@ The tool provides a unified 30-level brightness scale:
 
 ### Optional
 
-- [OpenRGB](https://openrgb.org/) - for keyboard backlight control
+- [brightnessctl](https://github.com/Hummer12007/brightnessctl) - for system keyboard backlight control (ThinkPad, etc.)
+- [OpenRGB](https://openrgb.org/) - for RGB keyboard backlight control
 
 ## Development
 

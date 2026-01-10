@@ -4,11 +4,17 @@ Unit tests for Brightness.keyboard module.
 These tests verify keyboard backlight control logic with mocked subprocess calls.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from Brightness.keyboard import KeyboardBacklight, update_keyboard_backlight
+from Brightness.keyboard import (
+    KeyboardBacklight,
+    detect_keyboard_backend,
+    get_brightnessctl_device,
+    get_brightnessctl_max_brightness,
+    update_keyboard_backlight,
+)
 
 
 def make_config(**overrides):
@@ -19,6 +25,7 @@ def make_config(**overrides):
         "device_index": 0,
         "vendor_id": 0x048D,
         "product_id": 0xC967,
+        "brightnessctl_device": "tpacpi::kbd_backlight",
         "disable_threshold": 15,
         "max_backlight_level": 14,
         "min_backlight_level": 0,
@@ -116,10 +123,12 @@ class TestCalculatePower:
 class TestSetBacklight:
     """Tests for the set_backlight method."""
 
+    @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
     @patch("Brightness.keyboard.subprocess.Popen")
-    def test_set_backlight_calls_openrgb(self, mock_popen, mock_which):
+    def test_set_backlight_calls_openrgb(self, mock_popen, mock_which, mock_get_device):
         """set_backlight should call openrgb CLI with correct arguments."""
+        mock_get_device.return_value = None
         mock_which.return_value = "/usr/bin/openrgb"
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
         success, rgb = kb.set_backlight(10)  # Some brightness level
@@ -132,10 +141,12 @@ class TestSetBacklight:
         assert "openrgb" in cmd
         assert "--noautoconnect" in cmd
 
+    @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
     @patch("Brightness.keyboard.subprocess.Popen")
-    def test_set_backlight_high_brightness_turns_off(self, mock_popen, mock_which):
+    def test_set_backlight_high_brightness_turns_off(self, mock_popen, mock_which, mock_get_device):
         """set_backlight with high brightness should turn off the backlight."""
+        mock_get_device.return_value = None
         mock_which.return_value = "/usr/bin/openrgb"
         kb = KeyboardBacklight(
             make_config(
@@ -151,10 +162,12 @@ class TestSetBacklight:
         # Should set color to black (000000)
         assert "000000" in cmd
 
+    @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
     @patch("Brightness.keyboard.subprocess.Popen")
-    def test_set_backlight_handles_failure(self, mock_popen, mock_which):
+    def test_set_backlight_handles_failure(self, mock_popen, mock_which, mock_get_device):
         """set_backlight should return False on subprocess failure."""
+        mock_get_device.return_value = None
         mock_which.return_value = "/usr/bin/openrgb"
         # The exception should be caught by the try/except in _set_via_openrgb_cli
         mock_popen.side_effect = OSError("Command failed")
@@ -164,9 +177,11 @@ class TestSetBacklight:
         # RGB is still calculated even if command fails
         assert isinstance(rgb, tuple)
 
+    @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
-    def test_set_backlight_returns_false_when_openrgb_missing(self, mock_which):
+    def test_set_backlight_returns_false_when_openrgb_missing(self, mock_which, mock_get_device):
         """set_backlight should return False when openrgb is not installed."""
+        mock_get_device.return_value = None
         mock_which.return_value = None
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
         success, rgb = kb.set_backlight(10)
@@ -250,10 +265,12 @@ class TestColorParsing:
 class TestTurnOff:
     """Tests for the turn_off method."""
 
+    @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
     @patch("Brightness.keyboard.subprocess.Popen")
-    def test_turn_off_sets_black_color(self, mock_popen, mock_which):
+    def test_turn_off_sets_black_color(self, mock_popen, mock_which, mock_get_device):
         """turn_off should set color to black."""
+        mock_get_device.return_value = None
         mock_which.return_value = "/usr/bin/openrgb"
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
         result = kb.turn_off()
@@ -261,3 +278,204 @@ class TestTurnOff:
         call_args = mock_popen.call_args
         cmd = call_args[0][0]
         assert "000000" in cmd
+
+    @patch("Brightness.keyboard.get_brightnessctl_device")
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    @patch("Brightness.keyboard.get_brightnessctl_max_brightness")
+    def test_turn_off_brightnessctl(self, mock_max, mock_run, mock_which, mock_get_device):
+        """turn_off with brightnessctl should set brightness to 0."""
+        mock_get_device.return_value = "tpacpi::kbd_backlight"
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_max.return_value = 2
+        mock_run.return_value = MagicMock(returncode=0)
+        kb = KeyboardBacklight(make_config(backend="brightnessctl"))
+        result = kb.turn_off()
+        assert result is True
+        # Should call brightnessctl set 0 (may be called twice: once for device detection, once for set)
+        assert mock_run.call_count >= 1
+        # Find the call that sets brightness to 0
+        set_call_found = False
+        for call in mock_run.call_args_list:
+            call_args = call[0][0]
+            if "set" in call_args and "0" in call_args:
+                set_call_found = True
+                break
+        assert set_call_found, "Expected brightnessctl set 0 call not found"
+
+
+# ============================================================================
+# Tests for brightnessctl backend
+# ============================================================================
+
+
+class TestBrightnessctlBackend:
+    """Tests for the brightnessctl backend."""
+
+    @patch("Brightness.keyboard.get_brightnessctl_device")
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    @patch("Brightness.keyboard.get_brightnessctl_max_brightness")
+    def test_set_backlight_brightnessctl(self, mock_max, mock_run, mock_which, mock_get_device):
+        """set_backlight with brightnessctl should call brightnessctl set."""
+        mock_get_device.return_value = "tpacpi::kbd_backlight"
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_max.return_value = 2  # ThinkPad has 3 levels: 0, 1, 2
+        mock_run.return_value = MagicMock(returncode=0)
+        kb = KeyboardBacklight(make_config(backend="brightnessctl"))
+        success, rgb = kb.set_backlight(10)  # Some brightness level
+        assert success is True
+        # Find the set call
+        set_call_found = False
+        for call in mock_run.call_args_list:
+            call_args = call[0][0]
+            if "set" in call_args and "--device" in call_args:
+                set_call_found = True
+                break
+        assert set_call_found, "Expected brightnessctl set call not found"
+
+    @patch("Brightness.keyboard.get_brightnessctl_device")
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    @patch("Brightness.keyboard.get_brightnessctl_max_brightness")
+    def test_brightnessctl_maps_power_to_levels(self, mock_max, mock_run, mock_which, mock_get_device):
+        """brightnessctl should map power (0-1) to discrete levels."""
+        mock_get_device.return_value = "tpacpi::kbd_backlight"
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_max.return_value = 2  # 3 levels: 0, 1, 2
+        mock_run.return_value = MagicMock(returncode=0)
+
+        kb = KeyboardBacklight(
+            make_config(
+                backend="brightnessctl",
+                disable_threshold=20,
+                max_backlight_level=14,
+                min_backlight_level=0,
+                max_power=1.0,
+                min_power=0.0,
+            )
+        )
+
+        # At max_backlight_level (power=1.0), should set level 2
+        kb.set_backlight(14)
+        call_args = mock_run.call_args[0][0]
+        assert "2" in call_args
+
+    @patch("Brightness.keyboard.get_brightnessctl_device")
+    @patch("Brightness.keyboard.shutil.which")
+    def test_brightnessctl_returns_false_when_missing(self, mock_which, mock_get_device):
+        """brightnessctl backend should return False when brightnessctl is not installed."""
+        mock_get_device.return_value = "tpacpi::kbd_backlight"
+        mock_which.return_value = None
+        kb = KeyboardBacklight(make_config(backend="brightnessctl"))
+        success, rgb = kb.set_backlight(10)
+        assert success is False
+
+    @patch("Brightness.keyboard.get_brightnessctl_device")
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    @patch("Brightness.keyboard.get_brightnessctl_max_brightness")
+    def test_brightnessctl_returns_false_on_zero_max(self, mock_max, mock_run, mock_which, mock_get_device):
+        """brightnessctl should return False if max brightness is 0."""
+        mock_get_device.return_value = "tpacpi::kbd_backlight"
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_max.return_value = 0  # Invalid max brightness
+        kb = KeyboardBacklight(make_config(backend="brightnessctl"))
+        success, rgb = kb.set_backlight(10)
+        assert success is False
+
+
+# ============================================================================
+# Tests for backend detection
+# ============================================================================
+
+
+class TestBackendDetection:
+    """Tests for automatic backend detection."""
+
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    def test_detect_brightnessctl_backend(self, mock_run, mock_which):
+        """detect_keyboard_backend should detect brightnessctl with kbd_backlight."""
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"Device 'tpacpi::kbd_backlight' of class 'leds':\n",
+        )
+        result = detect_keyboard_backend()
+        assert result == "brightnessctl"
+
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    def test_detect_openrgb_backend(self, mock_run, mock_which):
+        """detect_keyboard_backend should detect openrgb when brightnessctl has no kbd."""
+
+        def which_side_effect(cmd):
+            if cmd == "brightnessctl":
+                return None
+            if cmd == "openrgb":
+                return "/usr/bin/openrgb"
+            return None
+
+        mock_which.side_effect = which_side_effect
+        result = detect_keyboard_backend()
+        assert result == "openrgb-cli"
+
+    @patch("Brightness.keyboard.shutil.which")
+    def test_detect_no_backend(self, mock_which):
+        """detect_keyboard_backend should return None when no backend is available."""
+        mock_which.return_value = None
+        result = detect_keyboard_backend()
+        assert result is None
+
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    def test_get_brightnessctl_device(self, mock_run, mock_which):
+        """get_brightnessctl_device should parse device name from brightnessctl output."""
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"Device 'tpacpi::kbd_backlight' of class 'leds':\n",
+        )
+        result = get_brightnessctl_device()
+        assert result == "tpacpi::kbd_backlight"
+
+    @patch("Brightness.keyboard.shutil.which")
+    @patch("Brightness.keyboard.subprocess.run")
+    def test_get_brightnessctl_max_brightness(self, mock_run, mock_which):
+        """get_brightnessctl_max_brightness should return max brightness level."""
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"2\n",
+        )
+        result = get_brightnessctl_max_brightness("tpacpi::kbd_backlight")
+        assert result == 2
+
+
+# ============================================================================
+# Tests for auto backend selection
+# ============================================================================
+
+
+class TestAutoBackend:
+    """Tests for auto backend selection in KeyboardBacklight."""
+
+    @patch("Brightness.keyboard.detect_keyboard_backend")
+    def test_auto_backend_uses_detection(self, mock_detect):
+        """KeyboardBacklight with backend='auto' should use detect_keyboard_backend."""
+        mock_detect.return_value = "brightnessctl"
+        kb = KeyboardBacklight(make_config(backend="auto"))
+        assert kb.backend == "brightnessctl"
+
+    @patch("Brightness.keyboard.detect_keyboard_backend")
+    def test_auto_backend_fallback_to_openrgb(self, mock_detect):
+        """KeyboardBacklight with backend='auto' should fallback to openrgb-cli."""
+        mock_detect.return_value = None
+        kb = KeyboardBacklight(make_config(backend="auto"))
+        assert kb.backend == "openrgb-cli"
+
+    def test_explicit_backend_not_overridden(self):
+        """KeyboardBacklight with explicit backend should not use detection."""
+        kb = KeyboardBacklight(make_config(backend="hidapi"))
+        assert kb.backend == "hidapi"

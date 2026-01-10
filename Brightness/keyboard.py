@@ -4,7 +4,9 @@ Keyboard backlight control for bright.
 Controls keyboard backlight brightness based on screen brightness level.
 Supports multiple backends:
 - openrgb-cli: Uses OpenRGB command-line tool in one-shot mode (no daemon)
+- brightnessctl: Uses brightnessctl for system keyboard backlights (e.g., ThinkPad)
 - hidapi: Direct HID communication for specific keyboards
+- auto: Automatically detect and use the first available backend
 """
 
 import math
@@ -17,9 +19,118 @@ from typing import Any
 # 2.2 is standard sRGB gamma, we use 2.0 for a slightly more linear feel
 KEYBOARD_GAMMA = 2.0
 
+# Default device name for brightnessctl keyboard backlight
+DEFAULT_BRIGHTNESSCTL_DEVICE = "tpacpi::kbd_backlight"
+
+
+def detect_keyboard_backend() -> str | None:
+    """
+    Detect which keyboard backlight backend is available.
+
+    Checks for available backends in order of preference:
+    1. brightnessctl with keyboard backlight device
+    2. openrgb-cli
+    3. hidapi (if hid module is available)
+
+    Returns:
+        Backend name string or None if no backend is available.
+    """
+    # Check for brightnessctl with keyboard backlight device
+    if shutil.which("brightnessctl"):
+        try:
+            result = subprocess.run(
+                ["brightnessctl", "--list", "--class=leds"],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                output = result.stdout.decode("utf-8", errors="replace")
+                # Look for common keyboard backlight device patterns
+                kbd_patterns = ["kbd_backlight", "keyboard_backlight", "kbd-backlight"]
+                for pattern in kbd_patterns:
+                    if pattern in output.lower():
+                        return "brightnessctl"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    # Check for openrgb
+    if shutil.which("openrgb"):
+        return "openrgb-cli"
+
+    # Check for hidapi
+    try:
+        import hid  # type: ignore[import-not-found]
+
+        # Check if any HID devices are available
+        if hid.enumerate():
+            return "hidapi"
+    except ImportError:
+        pass
+
+    return None
+
+
+def get_brightnessctl_device() -> str | None:
+    """
+    Get the brightnessctl device name for keyboard backlight.
+
+    Returns:
+        Device name string or None if not found.
+    """
+    if not shutil.which("brightnessctl"):
+        return None
+
+    try:
+        result = subprocess.run(
+            ["brightnessctl", "--list", "--class=leds"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+
+        output = result.stdout.decode("utf-8", errors="replace")
+        # Parse output to find keyboard backlight device
+        # Format: "Device 'tpacpi::kbd_backlight' of class 'leds':"
+        kbd_patterns = ["kbd_backlight", "keyboard_backlight", "kbd-backlight"]
+        for line in output.split("\n"):
+            line_lower = line.lower()
+            for pattern in kbd_patterns:
+                if pattern in line_lower and "'" in line:
+                    # Extract device name from quotes
+                    parts = line.split("'")
+                    if len(parts) >= 2:
+                        return parts[1]
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def get_brightnessctl_max_brightness(device: str) -> int:
+    """
+    Get the maximum brightness level for a brightnessctl device.
+
+    Args:
+        device: The device name (e.g., 'tpacpi::kbd_backlight').
+
+    Returns:
+        Maximum brightness level (e.g., 2 for 0/1/2 levels), or 0 on error.
+    """
+    try:
+        result = subprocess.run(
+            ["brightnessctl", "--device", device, "max"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.decode("utf-8").strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        pass
+    return 0
+
 
 class KeyboardBacklight:
-    """Controls keyboard backlight via OpenRGB CLI or direct HID."""
+    """Controls keyboard backlight via OpenRGB CLI, brightnessctl, or direct HID."""
 
     def __init__(self, config: dict[str, Any]):
         """
@@ -29,11 +140,31 @@ class KeyboardBacklight:
             config: Keyboard configuration dictionary from Config.load()["keyboard"].
         """
         self.config = config
-        self.backend = config.get("backend", "openrgb-cli")
+        self._resolved_backend: str | None = None
+
+        # Get backend from config, with auto-detection support
+        configured_backend = config.get("backend", "auto")
+        if configured_backend == "auto":
+            self.backend = detect_keyboard_backend() or "openrgb-cli"
+        else:
+            self.backend = configured_backend
+
+        # OpenRGB-specific settings
         self.device_index = config.get("device_index", 0)
         self.mode = config.get("mode", "direct")  # "direct" works for most keyboards
+
+        # HID-specific settings
         self.vendor_id = config.get("vendor_id", 0x048D)
         self.product_id = config.get("product_id", 0xC967)
+
+        # brightnessctl-specific settings
+        self.brightnessctl_device = config.get(
+            "brightnessctl_device",
+            get_brightnessctl_device() or DEFAULT_BRIGHTNESSCTL_DEVICE,
+        )
+        self._brightnessctl_max: int | None = None
+
+        # Common settings
         self.disable_threshold = config.get("disable_threshold", 15)
         self.max_backlight_level = config.get("max_backlight_level", 14)
         self.min_backlight_level = config.get("min_backlight_level", 0)
@@ -137,12 +268,56 @@ class KeyboardBacklight:
         power = self.calculate_power(screen_brightness)
         rgb = self.calculate_rgb(screen_brightness)
 
-        if self.backend == "openrgb-cli":
+        if self.backend == "brightnessctl":
+            return (self._set_via_brightnessctl(power), rgb)
+        elif self.backend == "openrgb-cli":
             return (self._set_via_openrgb_cli(power), rgb)
         elif self.backend == "hidapi":
             return (self._set_via_hidapi(power), rgb)
         else:
             return (False, rgb)
+
+    def _set_via_brightnessctl(self, power: float) -> bool:
+        """
+        Set backlight via brightnessctl for system keyboard backlights.
+
+        This backend is for keyboards with system-level backlight control,
+        such as ThinkPad keyboards with tpacpi::kbd_backlight device.
+
+        The power value (0.0-1.0) is mapped to discrete brightness levels
+        supported by the device (typically 0, 1, 2 for ThinkPad keyboards).
+
+        Args:
+            power: Brightness power from 0.0 to 1.0.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        if not shutil.which("brightnessctl"):
+            return False
+
+        # Get max brightness for this device (cached)
+        if self._brightnessctl_max is None:
+            self._brightnessctl_max = get_brightnessctl_max_brightness(self.brightnessctl_device)
+
+        max_level = self._brightnessctl_max
+        if max_level <= 0:
+            return False
+
+        # Map power (0.0-1.0) to discrete brightness level (0 to max_level)
+        # Round to nearest integer level
+        level = round(power * max_level)
+        level = max(0, min(level, max_level))  # Clamp to valid range
+
+        try:
+            subprocess.run(
+                ["brightnessctl", "--device", self.brightnessctl_device, "set", str(level)],
+                capture_output=True,
+                timeout=5,
+            )
+            return True
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return False
 
     def _set_via_openrgb_cli(self, power: float) -> bool:
         """
@@ -239,7 +414,9 @@ class KeyboardBacklight:
             True if successful, False otherwise.
         """
         # Set power to 0 (all LEDs off)
-        if self.backend == "openrgb-cli":
+        if self.backend == "brightnessctl":
+            return self._set_via_brightnessctl(0.0)
+        elif self.backend == "openrgb-cli":
             return self._set_via_openrgb_cli(0.0)
         elif self.backend == "hidapi":
             return self._set_via_hidapi(0.0)

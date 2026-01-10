@@ -231,7 +231,7 @@ def test_default_keyboard_config_values():
     """DEFAULT_CONFIG keyboard section should have sensible defaults."""
     keyboard = Config.DEFAULT_CONFIG["keyboard"]
     assert keyboard["enabled"] is True
-    assert keyboard["backend"] == "openrgb-cli"
+    assert keyboard["backend"] == "auto"  # auto-detect backend
     assert 0 <= keyboard["max_power"] <= 1
     assert 0 <= keyboard["min_power"] <= 1
     assert keyboard["min_power"] <= keyboard["max_power"]

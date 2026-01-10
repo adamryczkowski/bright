@@ -16,8 +16,17 @@ state_file = "~/.local/share/brightness_level"
 enabled = true
 
 # Backend to use for keyboard control
-# Options: "openrgb-cli" (recommended), "hidapi" (direct HID access)
-backend = "openrgb-cli"
+# Options: "auto" (recommended), "brightnessctl", "openrgb-cli", "hidapi"
+# - auto: Automatically detect available backend (brightnessctl > openrgb > hidapi)
+# - brightnessctl: System keyboard backlight (ThinkPad, etc.) via brightnessctl
+# - openrgb-cli: RGB keyboards via OpenRGB command-line tool
+# - hidapi: Direct HID communication for specific keyboards
+backend = "auto"
+
+# brightnessctl device name (only for brightnessctl backend)
+# Leave empty for auto-detection, or specify e.g., "tpacpi::kbd_backlight"
+# Use `brightnessctl --list --class=leds` to find your device
+brightnessctl_device = ""
 
 # OpenRGB device index (use `openrgb --list-devices` to find your keyboard)
 device_index = 0
