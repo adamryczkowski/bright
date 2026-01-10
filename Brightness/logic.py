@@ -522,7 +522,13 @@ def get_primary_monitor() -> str:
     for line in output.split("\n"):
         if "primary" in line:
             return line.split()[0]
-    raise RuntimeError("No primary monitor found. Check xrandr output.")
+    raise DisplayNotAvailableError(
+        "No primary monitor found in xrandr output. "
+        "This can happen when:\n"
+        "  - No monitor is marked as primary (run 'xrandr --output <monitor> --primary'), or\n"
+        "  - Running over SSH without a local graphical session, or\n"
+        "  - The display is not properly configured"
+    )
 
 
 def get_primary_monitor_cached() -> str:
