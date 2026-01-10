@@ -1,9 +1,16 @@
+import importlib.util
 import sys
 from importlib.metadata import version as get_version
 
 import click
 
 from .config import Config
+from .keyboard import (
+    KeyboardBacklight,
+    detect_keyboard_backend,
+    get_brightnessctl_device,
+    get_brightnessctl_max_brightness,
+)
 from .logic import (
     DisplayNotAvailableError,
     change_brightness,
@@ -46,11 +53,12 @@ def main(no_keyboard: bool, operation: str | None):
     OPERATION can be:
 
     \b
-      +       Increase brightness by one step
-      -       Decrease brightness by one step
-      max     Set maximum brightness (level 19)
-      min     Set minimum brightness (level 9)
-      0-29    Set specific brightness level
+      +              Increase brightness by one step
+      -              Decrease brightness by one step
+      max            Set maximum brightness (level 19)
+      min            Set minimum brightness (level 9)
+      0-29           Set specific brightness level
+      test-keyboard  Test keyboard backlight detection and control
 
     The keyboard backlight is automatically adjusted based on screen brightness.
     Use --no-keyboard to disable this behavior.
@@ -67,7 +75,9 @@ def main(no_keyboard: bool, operation: str | None):
         click.echo(f"Created default configuration: {config_path}", err=True)
 
     try:
-        if operation == "max":
+        if operation == "test-keyboard":
+            _test_keyboard()
+        elif operation == "max":
             level, keyboard_rgb = set_max_brightness(no_keyboard=no_keyboard)
             click.echo(format_output(level, keyboard_rgb))
         elif operation == "min":
@@ -91,9 +101,79 @@ def main(no_keyboard: bool, operation: str | None):
             click.echo(format_output(level, keyboard_rgb))
         else:
             raise click.BadParameter(
-                f"Invalid operation: '{operation}'. Valid operations are: +, -, max, min, or 0-29",
+                f"Invalid operation: '{operation}'. Valid operations are: +, -, max, min, test-keyboard, or 0-29",
                 param_hint="'OPERATION'",
             )
     except DisplayNotAvailableError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+def _test_keyboard():
+    """Test keyboard backlight detection and control."""
+    import shutil
+
+    click.echo("=== Keyboard Backlight Test ===\n")
+
+    # Load config
+    config = Config.load()
+    keyboard_config = config.get("keyboard", {})
+
+    click.echo("1. Configuration:")
+    click.echo(f"   Enabled: {keyboard_config.get('enabled', True)}")
+    click.echo(f"   Configured backend: {keyboard_config.get('backend', 'auto')}")
+    click.echo(f"   Config file: {Config.get_user_config_path()}")
+    click.echo()
+
+    # Check available backends
+    click.echo("2. Backend Detection:")
+
+    # Check brightnessctl
+    brightnessctl_available = shutil.which("brightnessctl") is not None
+    click.echo(f"   brightnessctl installed: {brightnessctl_available}")
+    if brightnessctl_available:
+        device = get_brightnessctl_device()
+        if device:
+            max_brightness = get_brightnessctl_max_brightness(device)
+            click.echo(f"   brightnessctl device: {device}")
+            click.echo(f"   brightnessctl max brightness: {max_brightness}")
+        else:
+            click.echo("   brightnessctl device: (no keyboard backlight found)")
+
+    # Check openrgb
+    openrgb_available = shutil.which("openrgb") is not None
+    click.echo(f"   openrgb installed: {openrgb_available}")
+
+    # Check hidapi
+    hidapi_available = importlib.util.find_spec("hid") is not None
+    click.echo(f"   hidapi available: {hidapi_available}")
+
+    # Auto-detection result
+    detected = detect_keyboard_backend()
+    click.echo(f"   Auto-detected backend: {detected or '(none)'}")
+    click.echo()
+
+    # Test actual backend
+    click.echo("3. Keyboard Backlight Test:")
+    kb = KeyboardBacklight(keyboard_config)
+    click.echo(f"   Active backend: {kb.backend}")
+
+    # Try to set backlight to max
+    click.echo("   Testing: Setting keyboard to maximum brightness...")
+    success, rgb = kb.set_backlight(0)  # Level 0 = max keyboard brightness
+    if success:
+        click.echo(f"   Result: SUCCESS - RGB set to #{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}")
+    else:
+        click.echo("   Result: FAILED - Could not set keyboard backlight")
+        click.echo("   Hint: Check if the backend is correctly configured")
+
+    click.echo()
+    click.echo("4. Recommendations:")
+    if keyboard_config.get("backend") != "auto" and detected:
+        click.echo(f"   - Your config uses '{keyboard_config.get('backend')}' but '{detected}' was detected.")
+        click.echo("   - Consider changing 'backend' to 'auto' in your config file.")
+    elif not detected:
+        click.echo("   - No keyboard backlight backend was detected.")
+        click.echo("   - Install brightnessctl or openrgb for keyboard backlight support.")
+    else:
+        click.echo("   - Keyboard backlight configuration looks good!")
