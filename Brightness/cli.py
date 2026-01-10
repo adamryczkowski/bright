@@ -1,4 +1,5 @@
 import sys
+from importlib.metadata import version as get_version
 
 import click
 
@@ -12,6 +13,14 @@ from .logic import (
 )
 
 
+def get_package_version() -> str:
+    """Get the package version from metadata."""
+    try:
+        return get_version("bright")
+    except Exception:
+        return "unknown"
+
+
 def format_output(level: int, keyboard_rgb: tuple[int, int, int] | None) -> str:
     """Format the output message with brightness level and keyboard RGB."""
     if keyboard_rgb is not None:
@@ -22,14 +31,15 @@ def format_output(level: int, keyboard_rgb: tuple[int, int, int] | None) -> str:
 
 
 @click.command()
+@click.version_option(version=None, prog_name="bright", package_name="bright", message="%(prog)s %(version)s")
 @click.option(
     "--no-keyboard",
     is_flag=True,
     default=False,
     help="Disable keyboard backlight control for this invocation.",
 )
-@click.argument("operation", type=str, nargs=1)
-def main(no_keyboard: bool, operation: str):
+@click.argument("operation", type=str, nargs=1, required=False)
+def main(no_keyboard: bool, operation: str | None):
     """
     Control monitor brightness.
 
@@ -47,6 +57,10 @@ def main(no_keyboard: bool, operation: str):
 
     Configuration file: ~/.config/bright/config.toml
     """
+    # Handle missing operation argument
+    if operation is None:
+        raise click.UsageError("Missing argument 'OPERATION'.")
+
     # Ensure config file exists on first run
     if Config.ensure_config_exists():
         config_path = Config.get_user_config_path()
