@@ -63,3 +63,6 @@ Thumbs.db
 
 # Test package venv
 .testpkg-venv/
+
+# uv lock file (project uses poetry)
+uv.lock
