@@ -28,11 +28,29 @@ def get_package_version() -> str:
         return "unknown"
 
 
-def format_output(level: int, keyboard_rgb: tuple[int, int, int] | None) -> str:
-    """Format the output message with brightness level and keyboard RGB."""
-    if keyboard_rgb is not None:
-        r, g, b = keyboard_rgb
-        return f"Level: {level}, Keyboard RGB: #{r:02X}{g:02X}{b:02X} ({r}, {g}, {b})"
+def format_output(level: int, keyboard_info: tuple[tuple[int, int, int], str, int | None, str | None] | None) -> str:
+    """Format the output message with brightness level and keyboard information."""
+    if keyboard_info is not None:
+        rgb, backend, hw_level, error_msg = keyboard_info
+        r, g, b = rgb
+
+        # Format hardware level information
+        if backend == "brightnessctl":
+            hw_info = f" (brightnessctl, HW level: {hw_level})" if hw_level is not None else " (brightnessctl)"
+        elif backend == "openrgb-cli":
+            hw_info = " (OpenRGB)"
+        elif backend == "hidapi":
+            hw_info = " (HID)"
+        else:
+            hw_info = ""
+
+        output = f"Level: {level}, Keyboard RGB: #{r:02X}{g:02X}{b:02X} ({r}, {g}, {b}){hw_info}"
+
+        # Add error message if present
+        if error_msg:
+            output += f"\nWarning: {error_msg}"
+
+        return output
     else:
         return f"Level: {level}, Keyboard: disabled"
 
@@ -160,12 +178,17 @@ def _test_keyboard():
 
     # Try to set backlight to max
     click.echo("   Testing: Setting keyboard to maximum brightness...")
-    success, rgb = kb.set_backlight(0)  # Level 0 = max keyboard brightness
+    success, rgb, backend, hw_level, error_msg = kb.set_backlight(0)  # Level 0 = max keyboard brightness
     if success:
-        click.echo(f"   Result: SUCCESS - RGB set to #{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}")
+        hw_info = f", HW level: {hw_level}" if hw_level is not None else ""
+        click.echo(f"   Result: SUCCESS - RGB set to #{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}{hw_info}")
+        click.echo(f"   Backend used: {backend}")
     else:
         click.echo("   Result: FAILED - Could not set keyboard backlight")
-        click.echo("   Hint: Check if the backend is correctly configured")
+        if error_msg:
+            click.echo(f"   Error: {error_msg}")
+        else:
+            click.echo("   Hint: Check if the backend is correctly configured")
 
     click.echo()
     click.echo("4. Recommendations:")

@@ -411,7 +411,9 @@ def remove_gamma_correction():
         remove_gamma_correction_x11()
 
 
-def set_brightness_high_level(new_level: int, no_keyboard: bool = False) -> tuple[int, tuple[int, int, int] | None]:
+def set_brightness_high_level(
+    new_level: int, no_keyboard: bool = False
+) -> tuple[int, tuple[tuple[int, int, int], str, int | None, str | None] | None]:
     """
     Sets the brightness to the specified level.
 
@@ -420,8 +422,13 @@ def set_brightness_high_level(new_level: int, no_keyboard: bool = False) -> tupl
         no_keyboard: If True, skip keyboard backlight update.
 
     Returns:
-        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
-        (red, green, blue) values 0-255 or None if keyboard was skipped.
+        Tuple of (brightness_level, keyboard_info) where keyboard_info is either:
+        - None if keyboard was skipped or failed
+        - Tuple of (rgb, backend, hw_level, error_msg) where:
+          - rgb: (red, green, blue) values 0-255
+          - backend: Backend name ("brightnessctl", "openrgb-cli", "hidapi", or "none")
+          - hw_level: Hardware level (0-max for brightnessctl, None for others)
+          - error_msg: Error message if failed, None if successful
     """
     level_range = get_brightness_range(new_level)
     if level_range == HARDWARE_RANGE:
@@ -438,11 +445,13 @@ def set_brightness_high_level(new_level: int, no_keyboard: bool = False) -> tupl
     # Update keyboard backlight based on screen brightness
     from .keyboard import update_keyboard_backlight
 
-    keyboard_rgb = update_keyboard_backlight(new_level, no_keyboard=no_keyboard)
-    return (new_level, keyboard_rgb)
+    keyboard_info = update_keyboard_backlight(new_level, no_keyboard=no_keyboard)
+    return (new_level, keyboard_info)
 
 
-def change_brightness(flag_increase: bool, no_keyboard: bool = False) -> tuple[int, tuple[int, int, int] | None]:
+def change_brightness(
+    flag_increase: bool, no_keyboard: bool = False
+) -> tuple[int, tuple[tuple[int, int, int], str, int | None, str | None] | None]:
     """
     Changes the brightness by STEP_SIZE.
 
@@ -451,8 +460,9 @@ def change_brightness(flag_increase: bool, no_keyboard: bool = False) -> tuple[i
         no_keyboard: If True, skip keyboard backlight update.
 
     Returns:
-        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
-        (red, green, blue) values 0-255 or None if keyboard was skipped.
+        Tuple of (brightness_level, keyboard_info) where keyboard_info is either:
+        - None if keyboard was skipped or failed
+        - Tuple of (rgb, backend, hw_level, error_msg)
     """
     level = read_brightness_level()
     new_level = min(level + STEP_SIZE, sum(LEVEL_SIZES) - 1) if flag_increase else max(level - STEP_SIZE, 0)
@@ -461,7 +471,7 @@ def change_brightness(flag_increase: bool, no_keyboard: bool = False) -> tuple[i
 
 def set_max_brightness(
     no_keyboard: bool = False,
-) -> tuple[int, tuple[int, int, int] | None]:
+) -> tuple[int, tuple[tuple[int, int, int], str, int | None, str | None] | None]:
     """
     Sets the maximum brightness and gamma 1.0.
 
@@ -469,8 +479,9 @@ def set_max_brightness(
         no_keyboard: If True, skip keyboard backlight update.
 
     Returns:
-        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
-        (red, green, blue) values 0-255 or None if keyboard was skipped.
+        Tuple of (brightness_level, keyboard_info) where keyboard_info is either:
+        - None if keyboard was skipped or failed
+        - Tuple of (rgb, backend, hw_level, error_msg)
     """
     return set_brightness_high_level(LEVEL_SIZES[0] + LEVEL_SIZES[1] - 1, no_keyboard=no_keyboard)
 
@@ -569,7 +580,7 @@ def get_primary_monitor_cached() -> str:
 
 def set_min_brightness(
     no_keyboard: bool = False,
-) -> tuple[int, tuple[int, int, int] | None]:
+) -> tuple[int, tuple[tuple[int, int, int], str, int | None, str | None] | None]:
     """
     Sets the minimum brightness and gamma 1.0.
 
@@ -577,7 +588,8 @@ def set_min_brightness(
         no_keyboard: If True, skip keyboard backlight update.
 
     Returns:
-        Tuple of (brightness_level, keyboard_rgb) where keyboard_rgb is
-        (red, green, blue) values 0-255 or None if keyboard was skipped.
+        Tuple of (brightness_level, keyboard_info) where keyboard_info is either:
+        - None if keyboard was skipped or failed
+        - Tuple of (rgb, backend, hw_level, error_msg)
     """
     return set_brightness_high_level(LEVEL_SIZES[0] - 1, no_keyboard=no_keyboard)

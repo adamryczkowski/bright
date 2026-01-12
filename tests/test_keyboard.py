@@ -131,10 +131,13 @@ class TestSetBacklight:
         mock_get_device.return_value = None
         mock_which.return_value = "/usr/bin/openrgb"
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
-        success, rgb = kb.set_backlight(10)  # Some brightness level
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)  # Some brightness level
         assert success is True
         assert isinstance(rgb, tuple)
         assert len(rgb) == 3
+        assert backend == "openrgb-cli"
+        assert hw_level is None
+        assert error_msg is None
         mock_popen.assert_called_once()
         call_args = mock_popen.call_args
         cmd = call_args[0][0]
@@ -154,9 +157,11 @@ class TestSetBacklight:
                 disable_threshold=15,
             )
         )
-        success, rgb = kb.set_backlight(20)  # Above threshold
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(20)  # Above threshold
         assert success is True
         assert rgb == (0, 0, 0)  # Black when off
+        assert backend == "openrgb-cli"
+        assert error_msg is None
         call_args = mock_popen.call_args
         cmd = call_args[0][0]
         # Should set color to black (000000)
@@ -172,10 +177,12 @@ class TestSetBacklight:
         # The exception should be caught by the try/except in _set_via_openrgb_cli
         mock_popen.side_effect = OSError("Command failed")
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
-        success, rgb = kb.set_backlight(10)
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)
         assert success is False
+        assert backend == "openrgb-cli"
         # RGB is still calculated even if command fails
         assert isinstance(rgb, tuple)
+        assert error_msg is None  # openrgb doesn't return error messages
 
     @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
@@ -184,10 +191,12 @@ class TestSetBacklight:
         mock_get_device.return_value = None
         mock_which.return_value = None
         kb = KeyboardBacklight(make_config(backend="openrgb-cli"))
-        success, rgb = kb.set_backlight(10)
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)
         assert success is False
+        assert backend == "openrgb-cli"
         # RGB is still calculated even if openrgb is missing
         assert isinstance(rgb, tuple)
+        assert error_msg is None  # openrgb doesn't return error messages
 
 
 # ============================================================================
@@ -323,8 +332,11 @@ class TestBrightnessctlBackend:
         mock_max.return_value = 2  # ThinkPad has 3 levels: 0, 1, 2
         mock_run.return_value = MagicMock(returncode=0)
         kb = KeyboardBacklight(make_config(backend="brightnessctl"))
-        success, rgb = kb.set_backlight(10)  # Some brightness level
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)  # Some brightness level
         assert success is True
+        assert error_msg is None
+        assert backend == "brightnessctl"
+        assert hw_level is not None
         # Find the set call
         set_call_found = False
         for call in mock_run.call_args_list:
@@ -368,8 +380,10 @@ class TestBrightnessctlBackend:
         mock_get_device.return_value = "tpacpi::kbd_backlight"
         mock_which.return_value = None
         kb = KeyboardBacklight(make_config(backend="brightnessctl"))
-        success, rgb = kb.set_backlight(10)
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)
         assert success is False
+        assert error_msg is not None  # Should have error message about brightnessctl not found
+        assert backend == "brightnessctl"
 
     @patch("Brightness.keyboard.get_brightnessctl_device")
     @patch("Brightness.keyboard.shutil.which")
@@ -381,8 +395,10 @@ class TestBrightnessctlBackend:
         mock_which.return_value = "/usr/bin/brightnessctl"
         mock_max.return_value = 0  # Invalid max brightness
         kb = KeyboardBacklight(make_config(backend="brightnessctl"))
-        success, rgb = kb.set_backlight(10)
+        success, rgb, backend, hw_level, error_msg = kb.set_backlight(10)
         assert success is False
+        assert error_msg is not None  # Should have error message about max brightness
+        assert backend == "brightnessctl"
 
 
 # ============================================================================

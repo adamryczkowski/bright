@@ -255,7 +255,7 @@ class KeyboardBacklight:
         b = int(self.base_color[2] * power)
         return (r, g, b)
 
-    def set_backlight(self, screen_brightness: int) -> tuple[bool, tuple[int, int, int]]:
+    def set_backlight(self, screen_brightness: int) -> tuple[bool, tuple[int, int, int], str, int | None, str | None]:
         """
         Set keyboard backlight based on screen brightness level.
 
@@ -263,21 +263,29 @@ class KeyboardBacklight:
             screen_brightness: Current screen brightness level (0-29).
 
         Returns:
-            Tuple of (success, rgb) where rgb is (red, green, blue) values 0-255.
+            Tuple of (success, rgb, backend, hw_level, error_msg) where:
+            - success: True if backend command succeeded
+            - rgb: (red, green, blue) values 0-255
+            - backend: Name of backend used ("brightnessctl", "openrgb-cli", "hidapi", or "none")
+            - hw_level: Hardware brightness level (0-max_level for brightnessctl, None for others)
+            - error_msg: Error message if failed, None if successful
         """
         power = self.calculate_power(screen_brightness)
         rgb = self.calculate_rgb(screen_brightness)
 
         if self.backend == "brightnessctl":
-            return (self._set_via_brightnessctl(power), rgb)
+            success, hw_level, error_msg = self._set_via_brightnessctl(power)
+            return (success, rgb, "brightnessctl", hw_level, error_msg)
         elif self.backend == "openrgb-cli":
-            return (self._set_via_openrgb_cli(power), rgb)
+            success = self._set_via_openrgb_cli(power)
+            return (success, rgb, "openrgb-cli", None, None)
         elif self.backend == "hidapi":
-            return (self._set_via_hidapi(power), rgb)
+            success = self._set_via_hidapi(power)
+            return (success, rgb, "hidapi", None, None)
         else:
-            return (False, rgb)
+            return (False, rgb, "none", None, None)
 
-    def _set_via_brightnessctl(self, power: float) -> bool:
+    def _set_via_brightnessctl(self, power: float) -> tuple[bool, int | None, str | None]:
         """
         Set backlight via brightnessctl for system keyboard backlights.
 
@@ -291,10 +299,13 @@ class KeyboardBacklight:
             power: Brightness power from 0.0 to 1.0.
 
         Returns:
-            True if successful, False otherwise.
+            Tuple of (success, hw_level, error_msg) where:
+            - success: True if successful, False otherwise
+            - hw_level: Hardware brightness level that was set (0 to max_level)
+            - error_msg: Error message if failed, None if successful
         """
         if not shutil.which("brightnessctl"):
-            return False
+            return (False, None, "brightnessctl not found")
 
         # Get max brightness for this device (cached)
         if self._brightnessctl_max is None:
@@ -302,7 +313,52 @@ class KeyboardBacklight:
 
         max_level = self._brightnessctl_max
         if max_level <= 0:
-            return False
+            if not self.brightnessctl_device:
+                # Try to detect keyboard backlight devices
+                try:
+                    result = subprocess.run(
+                        ["brightnessctl", "--list", "--class=leds"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        output = result.stdout.decode("utf-8", errors="replace")
+                        # Find keyboard backlight devices
+                        kbd_devices = []
+                        for line in output.split("\n"):
+                            if "kbd" in line.lower() and "Device '" in line:
+                                # Extract device name from quotes
+                                parts = line.split("'")
+                                if len(parts) >= 2:
+                                    kbd_devices.append(parts[1])
+
+                        if kbd_devices:
+                            devices_list = "\n   ".join(f"- {dev}" for dev in kbd_devices)
+                            error_msg = (
+                                f"No keyboard backlight device configured. Found these keyboard devices:\n"
+                                f"   {devices_list}\n"
+                                f"   Add one to your config file (~/.config/bright/config.toml):\n"
+                                f"   [keyboard]\n"
+                                f'   brightnessctl_device = "{kbd_devices[0]}"'
+                            )
+                        else:
+                            error_msg = (
+                                "No keyboard backlight device detected on this system.\n"
+                                "   Your laptop may not have a keyboard backlight,\n"
+                                "   or it may use a different control method (e.g., OpenRGB)."
+                            )
+                    else:
+                        error_msg = "No keyboard backlight device configured and could not detect devices."
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    error_msg = "No keyboard backlight device configured and brightnessctl is not available."
+            else:
+                error_msg = (
+                    f"Could not get max brightness for device '{self.brightnessctl_device}'.\n"
+                    "   The device may not exist or you may lack permissions.\n"
+                    "   Check available devices with: brightnessctl --list --class=leds\n"
+                    "   If the device name is different, update ~/.config/bright/config.toml"
+                )
+            return (False, None, error_msg)
 
         # Map power (0.0-1.0) to discrete brightness level (0 to max_level)
         # Round to nearest integer level
@@ -310,14 +366,46 @@ class KeyboardBacklight:
         level = max(0, min(level, max_level))  # Clamp to valid range
 
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["brightnessctl", "--device", self.brightnessctl_device, "set", str(level)],
                 capture_output=True,
                 timeout=5,
             )
-            return True
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return False
+            if result.returncode == 0:
+                return (True, level, None)
+            else:
+                # Check if it's a permission error
+                stderr = result.stderr.decode("utf-8", errors="replace")
+                if "Permission denied" in stderr or "permission" in stderr.lower():
+                    device_path = f"/sys/class/leds/{self.brightnessctl_device}/brightness"
+                    error_msg = (
+                        f"Permission denied: Cannot write to {self.brightnessctl_device}.\n"
+                        f"   To fix this, add your user to the 'input' group:\n"
+                        f"   sudo usermod -aG input $USER\n"
+                        f"   Then log out and log back in.\n"
+                        f"   Alternatively, set permissions on {device_path}:\n"
+                        f"   sudo chmod 666 {device_path}"
+                    )
+                    return (False, level, error_msg)
+                else:
+                    return (False, level, f"brightnessctl failed: {stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            return (False, level, "brightnessctl command timed out")
+        except FileNotFoundError:
+            return (False, level, "brightnessctl not found")
+        except PermissionError as e:
+            device_path = f"/sys/class/leds/{self.brightnessctl_device}/brightness"
+            error_msg = (
+                f"Permission denied: {e}.\n"
+                f"   To fix this, add your user to the 'input' group:\n"
+                f"   sudo usermod -aG input $USER\n"
+                f"   Then log out and log back in.\n"
+                f"   Alternatively, set permissions on {device_path}:\n"
+                f"   sudo chmod 666 {device_path}"
+            )
+            return (False, level, error_msg)
+        except OSError as e:
+            return (False, level, f"OS error: {e}")
 
     def _set_via_openrgb_cli(self, power: float) -> bool:
         """
@@ -415,7 +503,8 @@ class KeyboardBacklight:
         """
         # Set power to 0 (all LEDs off)
         if self.backend == "brightnessctl":
-            return self._set_via_brightnessctl(0.0)
+            success, _level, _error = self._set_via_brightnessctl(0.0)
+            return success
         elif self.backend == "openrgb-cli":
             return self._set_via_openrgb_cli(0.0)
         elif self.backend == "hidapi":
@@ -423,7 +512,9 @@ class KeyboardBacklight:
         return False
 
 
-def update_keyboard_backlight(brightness_level: int, no_keyboard: bool = False) -> tuple[int, int, int] | None:
+def update_keyboard_backlight(
+    brightness_level: int, no_keyboard: bool = False
+) -> tuple[tuple[int, int, int], str, int | None, str | None] | None:
     """
     Update keyboard backlight based on screen brightness.
 
@@ -435,8 +526,12 @@ def update_keyboard_backlight(brightness_level: int, no_keyboard: bool = False) 
         no_keyboard: If True, skip keyboard backlight update.
 
     Returns:
-        Tuple of (red, green, blue) values 0-255 if keyboard was updated,
-        None if keyboard control was skipped or failed.
+        Tuple of (rgb, backend, hw_level, error_msg) where:
+        - rgb: (red, green, blue) values 0-255
+        - backend: Name of backend used ("brightnessctl", "openrgb-cli", "hidapi", or "none")
+        - hw_level: Hardware brightness level (0-max for brightnessctl, None for others)
+        - error_msg: Error message if failed, None if successful
+        Returns None if keyboard control was skipped or failed.
     """
     if no_keyboard:
         return None
@@ -452,8 +547,8 @@ def update_keyboard_backlight(brightness_level: int, no_keyboard: bool = False) 
             return None
 
         kb = KeyboardBacklight(keyboard_config)
-        _success, rgb = kb.set_backlight(brightness_level)
-        return rgb
+        _success, rgb, backend, hw_level, error_msg = kb.set_backlight(brightness_level)
+        return (rgb, backend, hw_level, error_msg)
     except Exception:
         # Silently fail - keyboard backlight is optional
         return None

@@ -1,0 +1,86 @@
+# Bright Configuration File
+# Custom configuration for 3-level keyboard backlight
+#
+# Keyboard behavior:
+# - Screen brightness > 60% (level 18+): Keyboard OFF
+# - Screen brightness 20-60% (levels 6-17): Keyboard FULL
+# - Screen brightness < 20% (levels 0-5): Keyboard HALF
+#
+# Brightness scale: 30 levels (0-29)
+# - 60% of 30 = 18 (levels 0-17 are below 60%)
+# - 20% of 30 = 6 (levels 0-5 are below 20%)
+
+[brightness]
+# Default brightness level when state file doesn't exist (0-29)
+# Level 19 = maximum hardware brightness without gamma correction
+default_level = 19
+
+# Path to the file that stores the current brightness level
+state_file = "~/.local/share/brightness_level"
+
+[keyboard]
+# Enable keyboard backlight control
+enabled = true
+
+# Backend to use for keyboard control
+# "auto" will detect brightnessctl for system keyboard backlights
+backend = "auto"
+
+# brightnessctl device name (leave empty for auto-detection)
+brightnessctl_device = ""
+
+# Screen brightness level (0-29) above which keyboard backlight is disabled
+# 60% of 30 levels = 18, so disable at level 18 and above
+# Result: screen brightness ≥ 18 (≥ 60%) → keyboard OFF
+disable_threshold = 18
+
+# Screen brightness range for keyboard backlight mapping
+# max_backlight_level: upper bound (just below 60% threshold)
+# min_backlight_level: lower bound (just below 20% threshold)
+#
+# Key behavior from calculate_power():
+# - screen_brightness <= min_backlight_level → power = min_power
+# - screen_brightness >= max_backlight_level → power = max_power
+# - Between min and max → gamma-corrected interpolation
+#
+# Note: 'bright min' sets level 9, 'bright max' sets level 19
+#
+# Setting min_backlight_level = 5 means:
+# - Levels 0-5 (< 20%): power = min_power = 0.74 → HALF ✓
+# - Levels 6-17 (20%-60%): power interpolates from 0.74 to 1.0 → FULL ✓
+# - Levels 18+ (> 60%): keyboard OFF ✓
+max_backlight_level = 17
+min_backlight_level = 5
+
+# Keyboard backlight power range (0.0-1.0)
+#
+# With 3 discrete hardware levels (0=OFF, 1=HALF, 2=FULL):
+# hardware_level = round(power * 2)
+# - Power 0.00-0.24 → level 0 (OFF)
+# - Power 0.25-0.74 → level 1 (HALF)
+# - Power 0.75-1.00 → level 2 (FULL)
+#
+# Configuration:
+# - max_power = 1.0: At level 17, power = 1.0 → FULL
+# - min_power = 0.74: At levels 0-5, power = 0.74 → HALF
+#
+# At level 6 (20% threshold):
+# - linear_ratio = (6-5)/(17-5) = 1/12 = 0.083
+# - power = 0.74 + 0.083 * (1.0 - 0.74) = 0.762 → FULL ✓
+#
+# At level 9 ('bright min'):
+# - linear_ratio = (9-5)/(17-5) = 4/12 = 0.333
+# - power = 0.74 + 0.333 * 0.26 = 0.827 → FULL ✓
+#
+# At level 19 ('bright max'):
+# - screen_brightness >= disable_threshold → power = 0.0 → OFF ✓
+max_power = 1.0
+min_power = 0.74
+
+# Gamma correction: controls keyboard brightness curve
+# gamma=1.0 provides linear interpolation between min and max power
+gamma = 1.0
+
+# Base color for keyboard backlight (hex format)
+# White color - adjust if your keyboard looks better with a different color
+base_color = "#FFFFFF"
