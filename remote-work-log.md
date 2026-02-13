@@ -108,3 +108,43 @@ pipx install git+https://github.com/adamryczkowski/bright --force
 bright --version
 # Output: bright 1.3.0
 ```
+
+## Session: 2026-02-13 - Fetching keyboard backlight config from remote ThinkPad
+
+### Connection Details
+- Host: 192.168.42.205
+- User: adam
+- Connection ID: remote-thinkpad
+
+### Intention
+
+Fetch the keyboard backlight configuration from the remote ThinkPad to replicate it on the local system. The user reported that keyboard backlight works on the remote system but not on the local system.
+
+### Commands executed
+
+1. `cat --paging=never ~/.config/bright/config.toml`
+   - Output: Full configuration file with keyboard backlight settings
+   - Interpretation: The remote system has a properly configured keyboard backlight with:
+     - `brightnessctl_device = "tpacpi::kbd_backlight"` (explicitly set)
+     - `disable_threshold = 18` (keyboard OFF at 60%+ screen brightness)
+     - `max_backlight_level = 17`
+     - `min_backlight_level = 12`
+     - `max_power = 1.0` (FULL at level 17)
+     - `min_power = 0.74` (HALF at levels below 12)
+     - `gamma = 1.0` (linear interpolation)
+     - `base_color = "#FFFFFF"` (white)
+
+2. `ls /etc/udev/rules.d/*.rules`
+   - Output: List of udev rules files (no 90-backlight.rules)
+   - Interpretation: The remote system doesn't have a separate backlight udev rule
+
+3. `cat --paging=never /etc/udev/rules.d/99-input.rules`
+   - Output: `KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"`
+   - Interpretation: Same as local system
+
+### Outcome
+
+Copied the remote configuration to the local system at `~/.config/bright/config.toml`. The keyboard backlight now works correctly with 3 levels:
+- Level 19 (bright max): Keyboard OFF (HW level 0)
+- Level 17: Keyboard FULL (HW level 2)
+- Level 9 (bright min): Keyboard HALF (HW level 1)

@@ -158,10 +158,12 @@ class KeyboardBacklight:
         self.product_id = config.get("product_id", 0xC967)
 
         # brightnessctl-specific settings
-        self.brightnessctl_device = config.get(
-            "brightnessctl_device",
-            get_brightnessctl_device() or DEFAULT_BRIGHTNESSCTL_DEVICE,
-        )
+        # Handle empty string as "not configured" - fall back to auto-detection
+        configured_device = config.get("brightnessctl_device", "")
+        if configured_device:
+            self.brightnessctl_device = configured_device
+        else:
+            self.brightnessctl_device = get_brightnessctl_device() or DEFAULT_BRIGHTNESSCTL_DEVICE
         self._brightnessctl_max: int | None = None
 
         # Common settings
